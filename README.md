@@ -34,6 +34,8 @@ js/scoring.js                 pituus- ja tyylipisteet
 js/jump.js                    yhden hypyn tilakone (ei DOMia – ajettavissa myös Nodessa)
 js/input.js                   näppäimistö + kosketus -> {action, lean}
 js/storage.js                 localStorage-kääre
+js/leaderboard.js             globaali tulostaulu: nimi + laitetunnus, tuloksen lähetys, top 50
+worker/                       tulostaulun palvelin (Cloudflare Worker + D1), ks. alla
 js/ui.js                      DOM-valikot ja tulospaneeli
 js/render/scene.js            maailman piirto ja kamera
 js/render/jumper.js           hyppääjän asennot ja piirto
@@ -46,6 +48,36 @@ tools/                        kehityspalvelin, kuvakkeiden generointi
 `Jump` ei tiedä piirrosta eikä syötelaitteista mitään: sille annetaan joka askeleella
 `{action, lean}`. Sama luokka käy siis ihmispelaajalle, testibotille (`tests/bot.js`)
 ja myöhemmin tietokonevastustajille.
+
+## Globaali tulostaulu
+
+Palvelin on `worker/`-kansiossa: Cloudflare Worker + D1. Peli toimii ilman sitäkin –
+tulostaulu on päällä vain, kun `js/config.js`:n `LEADERBOARD.url` on asetettu.
+
+- `POST /score` `{name, deviceId, hill, distance, style}` – palvelin laskee kokonaispisteet itse
+  ja säilyttää vain pelaajan parhaan tuloksen. Vastaus: `{best, rank, improved}`.
+- `GET /top?hill=tuulivaara` – 50 parasta kokonaispisteiden mukaan.
+- Nimi (3–16 merkkiä) on varattu sille laitetunnukselle, joka käytti sitä ensin (`409 name_taken` muille).
+- Tarkistukset: pituus 0–`maxDistance` puolen metrin portain, tyylipisteet 0–60 puolentoista pisteen portain.
+- Rajoitukset: 12 lähetystä ja 60 hakua minuutissa per IP, lisäksi 5 s väli per laite.
+- CORS vain `wrangler.toml`:n `ALLOWED_ORIGIN`-osoitteelle; muualta tulevat lähetykset hylätään.
+
+Käyttöönotto (kerran):
+
+```powershell
+cd worker
+npm install
+npx wrangler login
+npx wrangler d1 create tuulimaki-scores      # kopioi database_id tiedostoon wrangler.toml
+npx wrangler d1 migrations apply tuulimaki-scores --remote
+npx wrangler deploy                          # tulostaa Workerin osoitteen -> js/config.js LEADERBOARD.url
+```
+
+Uuden mäen lisääminen: lisää se myös `worker/src/index.js`:n `HILLS`-taulukkoon ja aja `npx wrangler deploy`.
+
+Paikallinen kokeilu: tee `worker/.dev.vars`, jossa `ALLOWED_ORIGIN=http://localhost:8080`, aja
+`npx wrangler d1 migrations apply tuulimaki-scores --local` ja `npx wrangler dev`, ja avaa peli osoitteessa
+`http://localhost:8080/?api=http://localhost:8787`.
 
 ## Tilanne
 

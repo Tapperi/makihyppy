@@ -1,0 +1,14 @@
+{
+  "name": "tuulimaki-scores",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy",
+    "migrate": "wrangler d1 migrations apply tuulimaki-scores --remote",
+    "migrate:local": "wrangler d1 migrations apply tuulimaki-scores --local"
+  },
+  "devDependencies": {
+    "wrangler": "^4"
+  }
+}

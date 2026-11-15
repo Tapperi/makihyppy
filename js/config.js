@@ -117,4 +117,9 @@ export const BAND = {
   errFull: 12 * DEG,     // etäisyys kaistan reunasta, jolla virhe = 1 (täysi huojunta)
 };
 
+/** Globaali tulostaulu (worker/). Tyhjä url = tulostaulu pois päältä. */
+export const LEADERBOARD = {
+  url: '', // esim. 'https://tuulimaki-scores.<tilisi>.workers.dev' – näkyy `wrangler deploy` -komennon tulosteessa
+};
+
 export const GATE_TIME = 20; // lähtöaika sekunteina, sen jälkeen hyppääjä lähtee itse

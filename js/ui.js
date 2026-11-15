@@ -30,6 +30,82 @@ export class Ui {
     this.btnBack = $('btn-back');
     this.lastLabel = null;
     this.lastLean = null;
+    this.board = $('board');
+    this.nameDialog = $('name-dialog');
+    this.nameAsk = null;   // {validate, resolve} kun nimeä kysytään
+    $('btn-board-close').addEventListener('click', () => { this.board.hidden = true; });
+    $('name-form').addEventListener('submit', (e) => {
+      e.preventDefault();
+      if (!this.nameAsk) return;
+      const value = $('name-input').value;
+      const error = this.nameAsk.validate(value);
+      $('name-error').textContent = error ?? '';
+      if (error) return;
+      const { resolve } = this.nameAsk;
+      this.nameAsk = null;
+      this.nameDialog.hidden = true;
+      resolve(value);
+    });
+  }
+
+  /** Tulostaulu tai nimikysely on auki – pelin omat painallukset eivät saa mennä läpi. */
+  get modalOpen() { return !this.board.hidden || !this.nameDialog.hidden; }
+
+  /** Näyttää Tulostaulu-painikkeet (vain kun tulostaulu on käytössä). */
+  onBoard(fn) {
+    for (const id of ['btn-board', 'btn-board-result']) {
+      $(id).hidden = false;
+      $(id).addEventListener('click', fn);
+    }
+  }
+
+  /** Kysyy nimen. validate(nimi) palauttaa virhetekstin tai null. Ratkeaa kelvolliseen nimeen. */
+  askName(validate, { error = '', value = '' } = {}) {
+    const input = $('name-input');
+    input.value = value;
+    $('name-error').textContent = error;
+    this.nameDialog.hidden = false;
+    input.focus();
+    input.select();
+    return new Promise((resolve) => { this.nameAsk = { validate, resolve }; });
+  }
+
+  /** Avaa tulostaulun ja täyttää sen, kun haku (Promise) valmistuu. */
+  async showBoard(topPromise, myName) {
+    const list = $('board-list');
+    const status = $('board-status');
+    list.replaceChildren();
+    status.textContent = 'Haetaan…';
+    this.board.hidden = false;
+    let top;
+    try {
+      top = await topPromise;
+    } catch {
+      status.textContent = 'Tulostaulua ei saatu haettua. Tarkista yhteys.';
+      return;
+    }
+    status.textContent = top.length ? '' : 'Ei vielä tuloksia – hyppää ensimmäinen!';
+    const cell = (cls, text) => {
+      const el = document.createElement('span');
+      el.className = cls;
+      el.textContent = text;
+      return el;
+    };
+    list.replaceChildren(...top.map((e, i) => {
+      const li = document.createElement('li');
+      if (e.name === myName) li.className = 'me';
+      li.append(cell('rank', `${i + 1}.`), cell('name', e.name), cell('dist', `${fmt(e.distance)} m`), cell('pts', fmt(e.total)));
+      return li;
+    }));
+    list.querySelector('.me')?.scrollIntoView({ block: 'nearest' });
+  }
+
+  /** Tulospaneelin rivi tulostaulun tilasta. Tyhjä teksti piilottaa rivin. */
+  setOnline(text, good = false) {
+    const el = $('res-online');
+    el.textContent = text;
+    el.hidden = !text;
+    el.classList.toggle('good', good);
   }
 
   onStart(fn) { $('btn-start').addEventListener('click', fn); }

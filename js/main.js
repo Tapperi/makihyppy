@@ -10,6 +10,7 @@ import { Hud } from './render/hud.js';
 import { Ui } from './ui.js';
 import { getBest, recordJump } from './storage.js';
 import { makeRng } from './util.js';
+import * as lb from './leaderboard.js';
 
 const RESULT_DELAY = 2.4;   // tulospaneeli näin pian alastulon jälkeen (s)
 const FALL_DELAY = 12;      // kaatuessa odotetaan, että lumipallo pysähtyy (enintään näin kauan)
@@ -31,6 +32,7 @@ let mode = 'title';      // 'title' | 'play' | 'result'
 let resultShownAt = 0;
 let acc = 0;
 let last = 0;
+let nameProblem = null;   // virheteksti, jos palvelin hylkäsi nimen – kysytään uusi ennen seuraavaa lähetystä
 
 function resize() {
   const w = window.innerWidth, h = window.innerHeight;
@@ -55,6 +57,43 @@ function finishJump(now) {
   mode = 'result';
   resultShownAt = now;
   input.clear();
+  submitOnline(jump.result);
+}
+
+/** Alkuruudun Aloita: nimi kysytään kerran ennen ensimmäistä hyppyä. */
+async function start() {
+  if (mode !== 'title' || ui.modalOpen) return;
+  if (lb.enabled && !lb.playerName()) lb.setPlayerName(await ui.askName(lb.nameError));
+  newJump();
+}
+
+/** Lähettää tuloksen tulostauluun ja kertoo sijoituksen tulospaneelissa. */
+async function submitOnline(result) {
+  const showing = () => mode === 'result' && jump.result === result;
+  ui.setOnline('');
+  if (!lb.enabled || !lb.playerName()) return;
+  for (;;) {
+    if (nameProblem) {
+      if (!showing()) return;
+      lb.setPlayerName(await ui.askName(lb.nameError, { error: nameProblem, value: lb.playerName() }));
+      nameProblem = null;
+    }
+    if (!lb.shouldSubmit(hill.def.id, result)) return;
+    ui.setOnline('Lähetetään tulosta…');
+    const res = await lb.submitScore(hill.def.id, result);
+    if (res.reason === 'name_taken' || res.reason === 'bad_name') {
+      nameProblem = res.reason === 'name_taken'
+        ? 'Nimi on jo jonkun toisen käytössä. Valitse toinen.'
+        : 'Nimi ei kelpaa. Valitse toinen.';
+      continue;
+    }
+    if (!showing()) return;
+    if (res.ok) ui.setOnline(res.improved ? `Tulostaulussa sijalla ${res.rank}.` : `Sijasi tulostaulussa: ${res.rank}.`, res.improved);
+    else if (res.reason === 'offline') ui.setOnline('Ei yhteyttä – tulosta ei lähetetty tulostauluun.');
+    else if (res.reason === 'rate_limited') ui.setOnline('Liian monta lähetystä – tulosta ei tallennettu tulostauluun.');
+    else ui.setOnline('Tulostaulu ei vastaa juuri nyt.');
+    return;
+  }
 }
 
 function frame(ts) {
@@ -82,7 +121,7 @@ function frame(ts) {
         || (sliding && jump.t > (fell ? FALL_DELAY : RESULT_DELAY))
         || (sliding && fell && pressed && jump.t > FALL_SKIP);
       if (landed) finishJump(now);
-    } else if (input.takeAction() && now - resultShownAt > AGAIN_GUARD) {
+    } else if (input.takeAction() && !ui.modalOpen && now - resultShownAt > AGAIN_GUARD) {
       newJump();
     }
     ui.sync(jump);
@@ -97,12 +136,14 @@ function frame(ts) {
 
 // --- Käynnistys ---
 input.attach({ canvas, btnAction: ui.btnAction, btnFwd: ui.btnFwd, btnBack: ui.btnBack });
-ui.onStart(newJump);
-ui.onAgain(() => { if (performance.now() / 1000 - resultShownAt > 0.25) newJump(); });
+ui.onStart(start);
+if (lb.enabled) ui.onBoard(() => ui.showBoard(lb.fetchTop(hill.def.id), lb.playerName()));
+ui.onAgain(() => { if (!ui.modalOpen && performance.now() / 1000 - resultShownAt > 0.25) newJump(); });
 window.addEventListener('resize', resize);
 window.addEventListener('orientationchange', resize);
 window.addEventListener('keydown', (e) => {
-  if (mode === 'title' && (e.code === 'Space' || e.code === 'Enter') && !e.repeat) { e.preventDefault(); newJump(); }
+  if (e.target instanceof HTMLInputElement || e.target instanceof HTMLButtonElement) return;
+  if (mode === 'title' && (e.code === 'Space' || e.code === 'Enter') && !e.repeat) { e.preventDefault(); start(); }
 });
 
 resize();

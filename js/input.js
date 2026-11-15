@@ -36,6 +36,7 @@ export class Input {
 
   attach({ canvas, btnAction, btnFwd, btnBack }) {
     window.addEventListener('keydown', (e) => {
+      if (e.target instanceof HTMLInputElement) return; // nimen kirjoitus
       if (e.target instanceof HTMLButtonElement && ACTION_KEYS.has(e.code)) return; // anna painikkeen hoitaa
       if (ACTION_KEYS.has(e.code)) { if (!e.repeat) this.actionQueued = true; }
       else if (FWD_KEYS.has(e.code)) this.fwd.add(e.code);

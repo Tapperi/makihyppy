@@ -21,6 +21,28 @@ export function getBest(hillId) {
   return read().best?.[hillId] ?? null;
 }
 
+/** Tulostaulun pelaaja: {name, deviceId} tai null. */
+export function getPlayer() {
+  return read().player ?? null;
+}
+
+export function savePlayer(player) {
+  const data = read();
+  data.player = player;
+  write(data);
+}
+
+/** Viimeisin palvelimen vahvistama paras tulos: {name, total} tai null. */
+export function getOnlineBest(hillId) {
+  return read().online?.[hillId] ?? null;
+}
+
+export function saveOnlineBest(hillId, best) {
+  const data = read();
+  (data.online ??= {})[hillId] = best;
+  write(data);
+}
+
 /** Päivittää ennätykset. Palauttaa {distanceRecord, pointsRecord}. */
 export function recordJump(hillId, result) {
   const data = read();

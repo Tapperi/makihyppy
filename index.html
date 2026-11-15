@@ -41,6 +41,7 @@
       </ol>
       <p class="keys">Näppäimet: välilyönti ja nuolet ↑ ↓</p>
       <button id="btn-start" class="primary" type="button">Aloita</button>
+      <button id="btn-board" class="secondary" type="button" hidden>Tulostaulu</button>
       <p id="title-best" class="best"></p>
     </div>
   </section>
@@ -58,8 +59,33 @@
       <p id="res-deductions" class="fine"></p>
       <p class="fine">Ponnistus <b id="res-takeoff"></b> · nopeus nokalla <b id="res-speed"></b></p>
       <p id="res-record" class="record"></p>
+      <p id="res-online" class="online" hidden></p>
       <button id="btn-again" class="primary" type="button">Uusi hyppy</button>
+      <button id="btn-board-result" class="secondary" type="button" hidden>Tulostaulu</button>
     </div>
+  </section>
+
+  <!-- Globaali tulostaulu -->
+  <section id="board" class="overlay modal" hidden>
+    <div class="card">
+      <h2>Tulostaulu</h2>
+      <p class="hill">Tuulivaara · 50 parasta</p>
+      <p id="board-status" class="fine"></p>
+      <ol id="board-list"></ol>
+      <button id="btn-board-close" class="primary" type="button">Sulje</button>
+    </div>
+  </section>
+
+  <!-- Nimen kysyminen (kerran) -->
+  <section id="name-dialog" class="overlay modal" hidden>
+    <form id="name-form" class="card" novalidate>
+      <h2>Nimesi tulostauluun</h2>
+      <p class="fine">3–16 merkkiä. Nimi varataan tälle laitteelle.</p>
+      <input id="name-input" type="text" maxlength="16" autocomplete="nickname" autocapitalize="words"
+             spellcheck="false" enterkeyhint="done" aria-label="Nimi" aria-describedby="name-error">
+      <p id="name-error" class="error" role="alert"></p>
+      <button class="primary" type="submit">Jatka</button>
+    </form>
   </section>
 
   <div id="rotate" aria-hidden="true"><p>Käännä puhelin pystyasentoon</p></div>

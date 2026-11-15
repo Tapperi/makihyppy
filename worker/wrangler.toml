@@ -1,0 +1,24 @@
+name = "tuulimaki-scores"
+main = "src/index.js"
+compatibility_date = "2025-10-01"
+
+[vars]
+# Pelin osoitteen origin (ei polkua, ei lopun kauttaviivaa). CORS sallitaan vain tälle.
+ALLOWED_ORIGIN = "https://tapperi.github.io"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "tuulimaki-scores"
+database_id = "38dfb905-0970-41c2-a377-4918429f7a67" 
+migrations_dir = "migrations"
+
+# Pyyntörajat per IP-osoite. period saa olla 10 tai 60 (s).
+[[ratelimits]]
+name = "RL_POST"
+namespace_id = "1001"
+simple = { limit = 12, period = 60 }
+
+[[ratelimits]]
+name = "RL_GET"
+namespace_id = "1002"
+simple = { limit = 60, period = 60 }
