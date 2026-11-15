@@ -1,6 +1,13 @@
 // Pieni kääre localStoragelle. Vaiheessa 2 kauden tallennus tulee tänne.
 
+import { SEASON } from './config.js';
+
 const KEY = 'tuulimaki.v1';
+
+/** Kauden ennätykset. Kausi 1 on juuritasolla (tallennettu ennen kausia), muut seasons-kentässä. */
+function seasonData(data) {
+  return SEASON === 1 ? data : ((data.seasons ??= {})[SEASON] ??= {});
+}
 
 function read() {
   try {
@@ -16,9 +23,9 @@ function write(data) {
   } catch { /* yksityinen selaus tms. – peli toimii silti */ }
 }
 
-/** Mäkikohtainen ennätys: {distance, total} tai null. */
+/** Mäkikohtainen ennätys tällä kaudella: {distance, total} tai null. */
 export function getBest(hillId) {
-  return read().best?.[hillId] ?? null;
+  return seasonData(read()).best?.[hillId] ?? null;
 }
 
 /** Tulostaulun pelaaja: {name, deviceId} tai null. */
@@ -34,27 +41,27 @@ export function savePlayer(player) {
 
 /** Viimeisin palvelimen vahvistama paras tulos: {name, total} tai null. */
 export function getOnlineBest(hillId) {
-  return read().online?.[hillId] ?? null;
+  return seasonData(read()).online?.[hillId] ?? null;
 }
 
 export function saveOnlineBest(hillId, best) {
   const data = read();
-  (data.online ??= {})[hillId] = best;
+  (seasonData(data).online ??= {})[hillId] = best;
   write(data);
 }
 
 /** Päivittää ennätykset. Palauttaa {distanceRecord, pointsRecord}. */
 export function recordJump(hillId, result) {
   const data = read();
-  data.best ??= {};
-  const prev = data.best[hillId] ?? { distance: 0, total: 0 };
+  const best = (seasonData(data).best ??= {});
+  const prev = best[hillId] ?? { distance: 0, total: 0 };
   const valid = result.outcome !== 'fall'; // kaatunut hyppy ei kelpaa pituusennätykseksi
   const distanceRecord = valid && result.distance > prev.distance;
   const pointsRecord = result.total > prev.total;
-  data.best[hillId] = {
+  best[hillId] = {
     distance: distanceRecord ? result.distance : prev.distance,
     total: pointsRecord ? result.total : prev.total,
   };
   write(data);
-  return { distanceRecord, pointsRecord, best: data.best[hillId] };
+  return { distanceRecord, pointsRecord, best: best[hillId] };
 }

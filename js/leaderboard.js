@@ -1,7 +1,7 @@
 // Globaali tulostaulu: yhteys Cloudflare Workeriin (worker/).
 // Peli toimii täysin ilman tätä – verkkovirheet eivät koskaan estä pelaamista.
 
-import { LEADERBOARD } from './config.js';
+import { LEADERBOARD, SEASON } from './config.js';
 import { getPlayer, savePlayer, getOnlineBest, saveOnlineBest } from './storage.js';
 
 const TIMEOUT = 8000;
@@ -64,7 +64,8 @@ export function shouldSubmit(hillId, result) {
 
 /**
  * Lähettää tuloksen. Palauttaa
- *   {ok: true, rank, improved, best} | {ok: false, reason: 'name_taken' | 'bad_name' | 'rate_limited' | 'offline' | 'error'}
+ *   {ok: true, rank, improved, best}
+ *   | {ok: false, reason: 'name_taken' | 'bad_name' | 'rate_limited' | 'season' | 'offline' | 'error'}
  */
 export async function submitScore(hillId, result) {
   const player = getPlayer();
@@ -76,6 +77,7 @@ export async function submitScore(hillId, result) {
         name: player.name,
         deviceId: player.deviceId,
         hill: hillId,
+        season: SEASON,
         distance: result.distance,
         style: result.style,
       }),
@@ -87,15 +89,20 @@ export async function submitScore(hillId, result) {
     if (status === 409) return { ok: false, reason: 'name_taken' };
     if (status === 429) return { ok: false, reason: 'rate_limited' };
     if (body.error === 'bad_name') return { ok: false, reason: 'bad_name' };
+    if (body.error === 'season_mismatch') return { ok: false, reason: 'season' };
     return { ok: false, reason: 'error' };
   } catch {
     return { ok: false, reason: 'offline' };
   }
 }
 
-/** 50 parasta: [{name, distance, style, total, at}]. Heittää virheen, jos haku ei onnistu. */
-export async function fetchTop(hillId) {
-  const { status, body } = await request(`/top?hill=${encodeURIComponent(hillId)}`);
+/**
+ * Kauden 50 parasta: {season, seasonName, currentSeason, top: [{name, distance, style, total, at}]}.
+ * season puuttuu = nykyinen kausi. Heittää virheen, jos haku ei onnistu.
+ */
+export async function fetchTop(hillId, season) {
+  const q = `/top?hill=${encodeURIComponent(hillId)}` + (season ? `&season=${season}` : '');
+  const { status, body } = await request(q);
   if (status !== 200) throw new Error(body.error || `HTTP ${status}`);
-  return body.top;
+  return body;
 }

@@ -33,7 +33,10 @@ export class Ui {
     this.board = $('board');
     this.nameDialog = $('name-dialog');
     this.nameAsk = null;   // {validate, resolve} kun nimeä kysytään
+    this.boardView = null;   // {fetchTop, myName, season, current} kun tulostaulu on avattu
     $('btn-board-close').addEventListener('click', () => { this.board.hidden = true; });
+    $('btn-season-prev').addEventListener('click', () => this.loadBoard(this.boardView.season - 1));
+    $('btn-season-next').addEventListener('click', () => this.loadBoard(this.boardView.season + 1));
     $('name-form').addEventListener('submit', (e) => {
       e.preventDefault();
       if (!this.nameAsk) return;
@@ -70,21 +73,44 @@ export class Ui {
     return new Promise((resolve) => { this.nameAsk = { validate, resolve }; });
   }
 
-  /** Avaa tulostaulun ja täyttää sen, kun haku (Promise) valmistuu. */
-  async showBoard(topPromise, myName) {
+  /** Avaa tulostaulun nykyiselle kaudelle. fetchTop(kausi) palauttaa Promisen; kausi puuttuu = nykyinen. */
+  showBoard(fetchTop, myName) {
+    this.boardView = { fetchTop, myName, season: null, current: null, loading: null };
+    $('board-season-name').textContent = '';
+    this.board.hidden = false;
+    return this.loadBoard();
+  }
+
+  /** Hakee ja näyttää yhden kauden tulokset. */
+  async loadBoard(season) {
+    const view = this.boardView;
+    const { myName } = view;
     const list = $('board-list');
     const status = $('board-status');
+    const prev = $('btn-season-prev'), next = $('btn-season-next');
+    const load = (view.loading = {}); // vain viimeisin haku saa päivittää näkymän
+    const stale = () => view.loading !== load || this.boardView !== view;
     list.replaceChildren();
     status.textContent = 'Haetaan…';
-    this.board.hidden = false;
-    let top;
+    prev.disabled = next.disabled = true;
+    let data;
     try {
-      top = await topPromise;
+      data = await view.fetchTop(season);
     } catch {
+      if (stale()) return;
       status.textContent = 'Tulostaulua ei saatu haettua. Tarkista yhteys.';
+      if (view.season) { prev.disabled = view.season <= 1; next.disabled = view.season >= view.current; }
       return;
     }
-    status.textContent = top.length ? '' : 'Ei vielä tuloksia – hyppää ensimmäinen!';
+    if (stale()) return;
+    const { top } = data;
+    view.season = data.season;
+    view.current = data.currentSeason;
+    $('board-season-name').textContent = `Kausi ${data.season}: ${data.seasonName}`;
+    prev.disabled = data.season <= 1;
+    next.disabled = data.season >= data.currentSeason;
+    status.textContent = top.length ? ''
+      : data.season === data.currentSeason ? 'Ei vielä tuloksia – hyppää ensimmäinen!' : 'Ei tuloksia tältä kaudelta.';
     const cell = (cls, text) => {
       const el = document.createElement('span');
       el.className = cls;

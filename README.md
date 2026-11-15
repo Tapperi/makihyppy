@@ -54,9 +54,13 @@ ja myöhemmin tietokonevastustajille.
 Palvelin on `worker/`-kansiossa: Cloudflare Worker + D1. Peli toimii ilman sitäkin –
 tulostaulu on päällä vain, kun `js/config.js`:n `LEADERBOARD.url` on asetettu.
 
-- `POST /score` `{name, deviceId, hill, distance, style}` – palvelin laskee kokonaispisteet itse
-  ja säilyttää vain pelaajan parhaan tuloksen. Vastaus: `{best, rank, improved}`.
-- `GET /top?hill=tuulivaara` – 50 parasta kokonaispisteiden mukaan.
+- `POST /score` `{name, deviceId, hill, season, distance, style}` – palvelin laskee kokonaispisteet itse
+  ja säilyttää vain pelaajan parhaan tuloksen per kausi. Vastaus: `{best, rank, improved}`.
+- `GET /top?hill=tuulivaara&season=1` – kauden 50 parasta kokonaispisteiden mukaan (ilman `season`-arvoa nykyinen kausi).
+- Kaudet: kun fysiikka muuttuu niin, etteivät vanhat tulokset ole vertailukelpoisia, kasvata `SEASON`-arvoa
+  sekä `js/config.js`:ssä että `worker/src/index.js`:ssä ja aja `npx wrangler deploy`. Uusi kausi alkaa tyhjältä
+  taululta, vanhat kaudet voi selata tulostaulun nuolilla. Kausien nimet ovat `worker/src/index.js`:n
+  `SEASON_NAMES`-listassa (1 = Murtumaraja). Vanhan kauden peliversio saa lähetyksestä `400 season_mismatch`.
 - Nimi (3–16 merkkiä) on varattu sille laitetunnukselle, joka käytti sitä ensin (`409 name_taken` muille).
 - Tarkistukset: pituus 0–`maxDistance` puolen metrin portain, tyylipisteet 0–60 puolentoista pisteen portain.
 - Rajoitukset: 12 lähetystä ja 60 hakua minuutissa per IP, lisäksi 5 s väli per laite.

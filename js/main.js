@@ -90,6 +90,7 @@ async function submitOnline(result) {
     if (!showing()) return;
     if (res.ok) ui.setOnline(res.improved ? `Tulostaulussa sijalla ${res.rank}.` : `Sijasi tulostaulussa: ${res.rank}.`, res.improved);
     else if (res.reason === 'offline') ui.setOnline('Ei yhteyttä – tulosta ei lähetetty tulostauluun.');
+    else if (res.reason === 'season') ui.setOnline('Peli on päivittynyt – lataa sivu uudelleen, niin tulokset tallentuvat.');
     else if (res.reason === 'rate_limited') ui.setOnline('Liian monta lähetystä – tulosta ei tallennettu tulostauluun.');
     else ui.setOnline('Tulostaulu ei vastaa juuri nyt.');
     return;
@@ -137,7 +138,7 @@ function frame(ts) {
 // --- Käynnistys ---
 input.attach({ canvas, btnAction: ui.btnAction, btnFwd: ui.btnFwd, btnBack: ui.btnBack });
 ui.onStart(start);
-if (lb.enabled) ui.onBoard(() => ui.showBoard(lb.fetchTop(hill.def.id), lb.playerName()));
+if (lb.enabled) ui.onBoard(() => ui.showBoard((season) => lb.fetchTop(hill.def.id, season), lb.playerName()));
 ui.onAgain(() => { if (!ui.modalOpen && performance.now() / 1000 - resultShownAt > 0.25) newJump(); });
 window.addEventListener('resize', resize);
 window.addEventListener('orientationchange', resize);

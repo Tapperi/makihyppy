@@ -1,6 +1,6 @@
 // Tuulimäen globaali tulostaulu: Cloudflare Worker + D1.
-//   POST /score  {name, deviceId, hill, distance, style}
-//   GET  /top?hill=tuulivaara   50 parasta, paras tulos per pelaaja
+//   POST /score  {name, deviceId, hill, season, distance, style}
+//   GET  /top?hill=tuulivaara&season=2   50 parasta, paras tulos per pelaaja (oletus: nykyinen kausi)
 //
 // Palvelin laskee kokonaispisteet itse pituudesta ja tyylipisteistä, joten
 // asiakkaan ilmoittamaan summaan ei luoteta.
@@ -9,6 +9,26 @@
 const HILLS = {
   tuulivaara: { k: 120, pointsPerMeter: 1.8, maxDistance: 155 },
 };
+
+/**
+ * Kaudet. Kausi vaihtuu, kun pelin fysiikka muuttuu niin, etteivät vanhat tulokset ole
+ * vertailukelpoisia: kasvata SEASON-arvoa täällä ja pelin js/config.js:ssä. Uusi kausi
+ * alkaa tyhjältä taululta, vanhat kaudet jäävät näkyviin. Nimet otetaan järjestyksessä.
+ */
+const SEASON = 2;
+const SEASON_NAMES = [
+  'Murtumaraja',
+  'Kriittinen Piste',
+  'Nivelsiteiden Syksy',
+  'Pehmeä Lasku',
+  'Vastatuuleen',
+  'Ristiside',
+  'Viimeinen Telemark',
+  'Pakkasen Kynsissä',
+  'Kaatumisen Taito',
+  'Kolmas Tuomio',
+];
+const seasonName = (n) => SEASON_NAMES[n - 1] ?? `Kausi ${n}`;
 
 const TOP_LIMIT = 50;
 const NAME_MIN = 3;
@@ -78,14 +98,17 @@ const tooMany = (json, seconds) => json(429, { error: 'rate_limited' }, { 'Retry
 async function getTop(url, env, json) {
   const hill = url.searchParams.get('hill') || 'tuulivaara';
   if (!Object.hasOwn(HILLS, hill)) return json(400, { error: 'unknown_hill' });
+  const raw = url.searchParams.get('season');
+  const season = raw === null ? SEASON : Number(raw);
+  if (!Number.isInteger(season) || season < 1 || season > SEASON) return json(400, { error: 'unknown_season' });
   const { results } = await env.DB.prepare(
     `SELECT p.name, s.distance, s.style, s.total, s.achieved_at AS at
        FROM scores s JOIN players p ON p.device_hash = s.device_hash
-      WHERE s.hill = ?
+      WHERE s.season = ? AND s.hill = ?
       ORDER BY s.total DESC, s.distance DESC, s.achieved_at ASC
       LIMIT ?`,
-  ).bind(hill, TOP_LIMIT).all();
-  return json(200, { hill, top: results }, { 'Cache-Control': 'public, max-age=20' });
+  ).bind(season, hill, TOP_LIMIT).all();
+  return json(200, { hill, season, seasonName: seasonName(season), currentSeason: SEASON, top: results }, { 'Cache-Control': 'public, max-age=20' });
 }
 
 async function postScore(request, env, json) {
@@ -116,12 +139,12 @@ async function postScore(request, env, json) {
       ).bind(deviceHash, name, nameKey, now),
       // Vain parannus korvaa aiemman tuloksen
       db.prepare(
-        `INSERT INTO scores (device_hash, hill, distance, style, total, achieved_at)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6)
-         ON CONFLICT (device_hash, hill) DO UPDATE
+        `INSERT INTO scores (device_hash, hill, season, distance, style, total, achieved_at)
+         VALUES (?1, ?2, ?7, ?3, ?4, ?5, ?6)
+         ON CONFLICT (device_hash, hill, season) DO UPDATE
            SET distance = ?3, style = ?4, total = ?5, achieved_at = ?6
          WHERE ?5 > scores.total OR (?5 = scores.total AND ?3 > scores.distance)`,
-      ).bind(deviceHash, hill, distance, style, total, now),
+      ).bind(deviceHash, hill, distance, style, total, now, SEASON),
     ]);
   } catch (err) {
     // Kaksi laitetta ehti varata saman nimen yhtä aikaa
@@ -130,16 +153,16 @@ async function postScore(request, env, json) {
   }
 
   const best = await db.prepare(
-    'SELECT distance, style, total, achieved_at AS at FROM scores WHERE device_hash = ? AND hill = ?',
-  ).bind(deviceHash, hill).first();
+    'SELECT distance, style, total, achieved_at AS at FROM scores WHERE device_hash = ? AND hill = ? AND season = ?',
+  ).bind(deviceHash, hill, SEASON).first();
   const ahead = await db.prepare(
     `SELECT COUNT(*) AS n FROM scores
-      WHERE hill = ?1 AND (total > ?2
+      WHERE season = ?5 AND hill = ?1 AND (total > ?2
          OR (total = ?2 AND distance > ?3)
          OR (total = ?2 AND distance = ?3 AND achieved_at < ?4))`,
-  ).bind(hill, best.total, best.distance, best.at).first();
+  ).bind(hill, best.total, best.distance, best.at, SEASON).first();
 
-  return json(200, { name, hill, best, rank: ahead.n + 1, improved: best.at === now });
+  return json(200, { name, hill, season: SEASON, best, rank: ahead.n + 1, improved: best.at === now });
 }
 
 /** Lukee ja tarkistaa pyynnön rungon. Palauttaa kentät tai {error}. */
@@ -157,6 +180,8 @@ async function readInput(request) {
 
   if (typeof body.deviceId !== 'string' || !UUID_RE.test(body.deviceId)) return { error: 'bad_device' };
   if (typeof body.hill !== 'string' || !Object.hasOwn(HILLS, body.hill)) return { error: 'unknown_hill' };
+  // Vanha pelin versio (eri fysiikka) ei saa lähettää tuloksia nykyiselle kaudelle
+  if (body.season !== SEASON) return { error: 'season_mismatch' };
 
   const { distance, style } = body;
   const onStep = (v, step) => Number.isInteger(Math.round(v / step * 1e6) / 1e6);

@@ -138,6 +138,13 @@ export const BAND = {
 };
 
 /** Globaali tulostaulu (worker/). Tyhjä url = tulostaulu pois päältä. */
+/**
+ * Kausi (ennätysten versio). Kasvata, kun fysiikka muuttuu niin, etteivät vanhat tulokset
+ * ole vertailukelpoisia – myös worker/src/index.js:n SEASON. Uusi kausi alkaa tyhjältä
+ * taululta; kausien nimet ovat workerissa.
+ */
+export const SEASON = 2;
+
 export const LEADERBOARD = {
   url: 'https://tuulimaki-scores.tapperi.workers.dev', // näkyy `wrangler deploy` -komennon tulosteessa
 };
