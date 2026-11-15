@@ -2,7 +2,7 @@
 // Ei riipu DOMista eikä piirrosta: ohjaus annetaan step()-kutsulle, joten samaa
 // luokkaa voi ajaa ihmispelaaja, testibotti tai (vaiheessa 2) tietokonevastustaja.
 
-import { TAKEOFF, FLIGHT, LANDING, GATE_TIME, WIND, BAND } from './config.js';
+import { G, INRUN, TAKEOFF, FLIGHT, LANDING, GATE_TIME, WIND, BAND } from './config.js';
 import { clamp, lerp, randn } from './util.js';
 import { inrunAccel, takeoffQuality, lateTakeoffQuality, flightAccel, slideAccel } from './physics.js';
 import { scoreJump, Outcome } from './scoring.js';
@@ -47,6 +47,10 @@ export class Jump {
     this.bandCenter = 0;        // vihreän kaistan keskikohta suhteessa FLIGHT.aoaOpt:iin (rad)
     this.bandHalf = BAND.widthCalm * BAND.range; // kaistan puolileveys (rad)
     this.bandError = 0;         // 0..1: osoittimen etäisyys kaistasta
+    this.balance = 0;           // kyykkyasennon osoitin -1..1 (+ = asento nousee)
+    this.balanceVel = 0;
+    this.balanceError = 0;      // 0..1: osoittimen etäisyys vihreästä kaistasta
+    this.swayPhase = this.rng() * Math.PI * 2;
     this.height = 0;            // korkeus rinteestä
     this.maxSpeed = 0;
     this.takeoffSpeed = 0;
@@ -98,7 +102,8 @@ export class Jump {
   stepInrun(dt, input) {
     const hill = this.hill;
     const angle = hill.inrunPos(this.d).angle;
-    this.speed = Math.max(0, this.speed + inrunAccel(this.speed, angle, this.wind.value) * dt);
+    this.updateBalance(dt, input);
+    this.speed = Math.max(0, this.speed + inrunAccel(this.speed, angle, this.wind.value, this.balanceError) * dt);
     this.d -= this.speed * dt;
 
     if (input.action && !this.takeoff.pressed && this.d <= TAKEOFF.zone) {
@@ -118,6 +123,24 @@ export class Jump {
     this.vx = Math.cos(p.angle) * this.speed;
     this.vy = -Math.sin(p.angle) * this.speed;
     this.maxSpeed = Math.max(this.maxSpeed, this.speed);
+  }
+
+  /**
+   * Kyykkyasennon tasapaino. Suoralla osoitin huojuu hitaasti; siirtymäkaaressa
+   * paine (v²/R) nostaa asentoa ja pelaajan pitää nojata eteen pysyäkseen kaistalla.
+   */
+  updateBalance(dt, input) {
+    const gLoad = this.speed * this.speed * this.hill.inrunCurvature(this.d) / G;
+    const sway = INRUN.swayAmp * Math.sin(this.swayPhase + (this.t / INRUN.swayPeriod) * Math.PI * 2);
+    const turb = INRUN.balanceTurb * Math.sqrt(dt) * randn(this.rng);
+    this.balanceVel += (-clamp(input.lean, -1, 1) * INRUN.balanceAccel + INRUN.curvePush * gLoad + sway
+      - this.balanceVel * INRUN.balanceDamp) * dt + turb;
+    this.balance += this.balanceVel * dt;
+    if (Math.abs(this.balance) >= 1) {
+      this.balance = Math.sign(this.balance);
+      this.balanceVel = 0;
+    }
+    this.balanceError = clamp((Math.abs(this.balance) - INRUN.balanceHalf) / INRUN.balanceErrFull, 0, 1);
   }
 
   launch() {
@@ -184,9 +207,10 @@ export class Jump {
       this.posture = Math.min(1, this.posture + dt / rise);
     }
 
-    // Suksien kulma: pelaajan ohjaus + tuulen pyörteet
+    // Suksien kulma: pelaajan ohjaus + tuulen pyörteet. Trimmi ei seuraa kaistaa:
+    // kun tuuli siirtää kaistaa, pelaajan pitää itse ohjata perässä.
     const turb = (FLIGHT.turbBase + FLIGHT.turbWind * Math.abs(wind)) * Math.sqrt(dt) * randn(this.rng);
-    const trim = (FLIGHT.trimAoa + this.bandCenter - this.aoa) * FLIGHT.trimRate * this.posture;
+    const trim = (FLIGHT.trimAoa - this.aoa) * FLIGHT.trimRate * this.posture;
     this.omega += (-clamp(input.lean, -1, 1) * FLIGHT.pitchAccel + trim - this.omega * FLIGHT.pitchDamp) * dt + turb;
     this.pitch += this.omega * dt;
     if (this.landPrep) {
@@ -202,7 +226,7 @@ export class Jump {
 
     this.updateBand(dt);
     const aoaOpt = FLIGHT.aoaOpt + this.bandCenter;
-    const acc = flightAccel(this.vx, this.vy, this.pitch, this.posture, wind, aoaOpt);
+    const acc = flightAccel(this.vx, this.vy, this.pitch, this.posture, wind, this.bandCenter, this.bandHalf);
     this.aoa = acc.aoa;
     const off = Math.abs(this.aoa - aoaOpt);
     this.bandError = this.landPrep ? 0 : clamp((off - this.bandHalf) / BAND.errFull, 0, 1);

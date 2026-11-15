@@ -37,6 +37,17 @@ export const INRUN = {
   friction: 0.03,
   drag: 0.0019,        // ilmanvastus kyykyssä (1/m)
   windFactor: 0.3,     // kuinka paljon tuuli tuntuu suojaisessa vauhtimäessä
+  // Kyykkyasennon tasapaino: osoitin -1..1 (+ = asento nousee / paino kantapäillä).
+  // Vihreällä kaistalla vastus on yllä oleva drag; kaistan ulkopuolella se kasvaa.
+  balanceHalf: 0.22,     // vihreän kaistan puolileveys
+  balanceErrFull: 0.5,   // etäisyys kaistan reunasta, jolla virhe = 1
+  dragPenalty: 0.22,     // vastuksen lisäys täydellä virheellä (osuus)
+  balanceAccel: 6,       // nojauksen teho (1/s²)
+  balanceDamp: 4,
+  curvePush: 6,          // siirtymäkaaren paine nostaa asentoa: kiihtyvyys per g (1/s²)
+  swayAmp: 1.8,          // hidas huojunta suoralla (1/s²)
+  swayPeriod: 2.6,       // (s)
+  balanceTurb: 0.35,     // satunnainen tärinä
 };
 
 export const TAKEOFF = {
@@ -52,13 +63,9 @@ export const TAKEOFF = {
 };
 
 export const FLIGHT = {
-  liftK: 0.0090,       // nostekerroin parhaassa asennossa (1/m)
-  dragBase: 0.0026,
-  dragAlpha: 0.021,   // kohtauskulmasta riippuva vastus
-  aoaOpt: 24 * DEG,    // paras kohtauskulma
-  aoaLow: 22 * DEG,    // nosteen leveys optimin alapuolella
-  aoaHigh: 21 * DEG,   // nosteen leveys optimin yläpuolella (sakkaus)
-  liftMin: 0.15,
+  liftK: 0.0086,       // nostekerroin kaistan sisällä (1/m); asento skaalaa tätä, ks. BAND
+  drag: 0.0061,        // vastuskerroin lentoasennossa (1/m)
+  aoaOpt: 24 * DEG,    // kaistan keskikohta tyynellä
   uprightLift: 0.0008, // pystyasento (ponnistuksen jälkeen / alastuloon valmistautuessa)
   uprightDrag: 0.0062,
   entryPitch: 10 * DEG,     // suksien asento, johon hyppääjä kiertyy itsestään ponnistuksen jälkeen
@@ -69,8 +76,8 @@ export const FLIGHT = {
   pitchAccel: 150 * DEG,    // ohjauksen kulmakiihtyvyys
   pitchDamp: 4.2,
   pitchLimit: 55 * DEG,
-  trimAoa: 27 * DEG,        // kohtauskulma, johon sukset pyrkivät itsestään (liian pysty -> pelaajan pitää painaa eteen)
-  trimRate: 14,              // palauttavan momentin voimakkuus (1/s²)
+  trimAoa: 30 * DEG,        // kohtauskulma, johon sukset pyrkivät itsestään: aina kaistan yläpuolella -> pelaajan pitää painaa eteen
+  trimRate: 8,              // palauttavan momentin voimakkuus (1/s²)
   windTilt: 18 * DEG,       // tuuli myötäilee rinnettä: vastatuuli puhaltaa hieman ylöspäin
   turbBase: 5 * DEG,        // tuulen pyörteiden vaikutus asentoon
   turbWind: 2.5 * DEG,
@@ -107,14 +114,27 @@ export const WIND = {
   burstLead: 0.4,      // ennakkovaroitus ennen kuin puuska alkaa vaikuttaa (s)
 };
 
-/** Asentomittarin vihreä kaista. Leveydet osuutena koko mittarin korkeudesta (2 × range). */
+/**
+ * Asentomittarin vihreä kaista ja lentoasennon suorituskyky. Leveydet osuutena
+ * koko mittarin korkeudesta (2 × range).
+ *
+ * Noste = FLIGHT.liftK × kerroin, joka riippuu vain osoittimen paikasta kaistaan nähden:
+ *   kaistan sisällä 1, etureunan (kärjet alhaalla) herkkukaistalla nousee arvoon 1 + edgeBonus,
+ *   etureunan yli noste romahtaa (sukellus), takareunan yli se hiipuu loivasti.
+ */
 export const BAND = {
   range: 20 * DEG,       // mittarin näyttämä poikkeama suuntaansa
   widthCalm: 0.25,       // kaistan leveys tyynellä
   widthWindy: 0.10,      // kaistan leveys täydellä tuulella (WIND.max)
-  shiftPerMs: 1.2 * DEG, // optimin siirtymä per m/s: vastatuuli -> kärjet alemmas, myötätuuli -> ylemmäs
+  shiftPerMs: 1.2 * DEG, // kaistan siirtymä per m/s: vastatuuli -> kärjet alemmas, myötätuuli -> ylemmäs
   follow: 6,             // kuinka nopeasti kaista seuraa tuulta (1/s)
   errFull: 12 * DEG,     // etäisyys kaistan reunasta, jolla virhe = 1 (täysi huojunta)
+  sweet: 1.5 * DEG,      // herkkukaistan leveys etureunassa
+  edgeBonus: 0.03,       // lisänoste aivan etureunalla
+  diveWidth: 5 * DEG,    // etureunan yli: noste putoaa arvoon diveMin tällä matkalla
+  diveMin: 0.75,
+  backWidth: 20 * DEG,   // takareunan yli: noste hiipuu arvoon backMin tällä matkalla
+  backMin: 0.75,
 };
 
 /** Globaali tulostaulu (worker/). Tyhjä url = tulostaulu pois päältä. */

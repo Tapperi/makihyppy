@@ -149,6 +149,7 @@ export class Scene {
     const gliding = jump.phase === Phase.FLIGHT && !jump.landPrep;
     const target = gliding
       ? clamp((jump.bandError + 0.45 * (wind.gustLevel || 0)) * jump.posture, 0, 1)
+      : jump.phase === Phase.INRUN ? jump.balanceError * 0.4 // huono kyykky näkyy kevyenä huojuntana
       : 0;
     this.wobble += (target - this.wobble) * (1 - Math.exp(-dt * 9));
     // Kevyt kameran tärinä vasta isolla virheellä
@@ -470,27 +471,30 @@ export class Scene {
     ctx.translate(cx, cy);
     ctx.rotate(jump.roll);                     // myötäpäivään = pyörii alamäkeen
 
-    // Hyppääjä pyörii pallon keskellä; kasvava pallo peittää hänet vähitellen
-    this.sprite.draw(ctx, -0.25 * js, 0.45 * js, js, 0);
+    // Aluksi hyppääjä pyörii näkyvissä; kun pallo kasvaa, hän jää kokonaan lumen sisään
+    if (jump.ballRadius < 0.9) this.sprite.draw(ctx, -0.25 * js, 0.45 * js, js, 0);
 
     if (R > 0.15 * sc) {
-      // Pallosta törröttävät sukset, käsi ja mono
-      const stick = (angle, len, width, color) => {
-        const c = Math.cos(angle), s = Math.sin(angle);
-        ctx.strokeStyle = color;
-        ctx.lineWidth = width * js;
+      // Pallosta törröttää vain kaksi suksea, vinosti pintaan nähden (ei kohtisuoraan)
+      const ski = (angle, tilt, len) => {
+        const px = Math.cos(angle) * R, py = Math.sin(angle) * R;
+        const dx = Math.cos(angle + tilt), dy = Math.sin(angle + tilt);
+        const out = len * js;
+        ctx.strokeStyle = COLORS.ski;
+        ctx.lineWidth = 0.07 * js;
         ctx.lineCap = 'round';
+        ctx.lineJoin = 'round';
         ctx.beginPath();
-        ctx.moveTo(c * R * 0.7, s * R * 0.7);
-        ctx.lineTo(c * (R + len * js), s * (R + len * js));
+        ctx.moveTo(px - dx * R * 0.5, py - dy * R * 0.5); // tyvi jää pallon alle
+        ctx.lineTo(px + dx * out, py + dy * out);
+        // kärjen taivutus
+        ctx.lineTo(px + dx * out + Math.cos(angle + tilt - 0.9) * 0.1 * js, py + dy * out + Math.sin(angle + tilt - 0.9) * 0.1 * js);
         ctx.stroke();
       };
-      const grown = clamp((jump.ballRadius - 1.6) / 0.8, 0, 1); // isossa pallossa näkyvät vain tyngät
+      const grown = clamp((jump.ballRadius - 0.7) / 0.6, 0, 1);
       if (grown > 0) {
-        stick(-0.5, 0.75 * grown, 0.07, COLORS.ski);
-        stick(2.5, 0.6 * grown, 0.07, COLORS.ski);
-        stick(1.2, 0.4 * grown, 0.11, COLORS.suitDark);
-        stick(-2.1, 0.3 * grown, 0.14, COLORS.boot);
+        ski(-0.7, 0.95, 0.95 * grown);
+        ski(2.2, -0.75, 0.6 * grown);
       }
 
       const g = ctx.createRadialGradient(-R * 0.3, -R * 0.35, R * 0.1, 0, 0, R);

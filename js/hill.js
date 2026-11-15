@@ -82,6 +82,11 @@ export function createHill(def) {
     inrunPos(d) {
       return { x: sample(inX, d), y: sample(inY, d), angle: inrunAngleAt(def, d) };
     },
+    /** Vauhtimäen kaarevuus (1/m) etäisyydellä d nokalta: nollasta poikkeava vain siirtymäkaaressa. */
+    inrunCurvature(d) {
+      const arcLen = def.inrunRadius * (def.inrunAngle - def.tableAngle);
+      return d > def.tableLength && d <= def.tableLength + arcLen ? 1 / def.inrunRadius : 0;
+    },
     /** Alastulorinteen piste etäisyydellä s. angle = rinteen lasku vaakatasosta. */
     landingPos(s) {
       return { x: sample(laX, s), y: sample(laY, s), angle: landingAngleAt(def, clamp(s, 0, landLen)) };

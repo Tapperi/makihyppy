@@ -2,10 +2,11 @@
 //   node tests/sim.test.mjs
 
 import assert from 'node:assert/strict';
-import { HILLS, WIND, STEP } from '../js/config.js';
+import { HILLS, WIND, STEP, BAND, DEG } from '../js/config.js';
 import { createHill } from '../js/hill.js';
 import { Wind } from '../js/wind.js';
 import { distancePoints, scoreJump } from '../js/scoring.js';
+import { posturePerf, inrunAccel } from '../js/physics.js';
 import { makeRng } from '../js/util.js';
 import { runJump, fixedWind } from './bot.js';
 
@@ -45,8 +46,31 @@ test('ponnistuksen ajoitus ratkaisee', () => {
   assert.ok(perfect - early > 4 && perfect - early < 15);
 });
 
+test('vauhtimäki: kyykyn pitäminen kaistalla antaa täyden vauhdin, huono asento hidastaa', () => {
+  assert.ok(inrunAccel(24, 0.5, 0, 1) < inrunAccel(24, 0.5, 0, 0));
+  for (let seed = 1; seed <= 5; seed++) {
+    const good = runJump(hill, fixedWind(0), {}, seed), idle = runJump(hill, fixedWind(0), { balance: false }, seed);
+    const perfect = runJump(hill, fixedWind(0), {}, 1).jump.takeoffSpeed;
+    assert.ok(Math.abs(good.jump.takeoffSpeed - perfect) < 0.01, 'hyvä botti ei menetä vauhtia');
+    const lost = (good.jump.takeoffSpeed - idle.jump.takeoffSpeed) * 3.6;
+    assert.ok(lost > 0.5 && lost < 2, `ohjaamatta menettää ${lost.toFixed(2)} km/h`);
+    assert.ok(good.result.distance - idle.result.distance > 3);
+  }
+});
+
 test('asennon säätö kannattaa', () => {
   assert.ok(dist(0) - dist(0, { steer: false }) > 15);
+});
+
+test('asentokäyrä: tasainen kaistan sisällä, paras etureunalla, romahtaa reunan yli', () => {
+  const half = 5 * DEG, perf = (deg) => posturePerf(deg * DEG, half);
+  assert.equal(perf(0), 1);
+  assert.equal(perf(4), 1);
+  assert.ok(Math.abs(perf(-5) - (1 + BAND.edgeBonus)) < 1e-9, 'huippu etureunalla');
+  assert.ok(perf(-4.5) > 1 && perf(-4.5) < perf(-5), 'herkkukaista nousee reunaa kohti');
+  assert.ok(perf(-6.5) < 1, 'reunan yli mennään nopeasti kaistan tason alle');
+  assert.ok(1 - perf(-7) > 3 * (1 - perf(7)), 'etureunan yli putoaa jyrkemmin kuin takareunan yli');
+  assert.ok(perf(-40) >= BAND.diveMin && perf(40) >= BAND.backMin);
 });
 
 test('alastulo: ilman painallusta kaatuu, liian aikainen lyhentää hyppyä', () => {

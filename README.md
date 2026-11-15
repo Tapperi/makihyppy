@@ -19,7 +19,7 @@ millä tahansa staattisella palvelulla (esim. GitHub Pages).
 | Vaihe | Kosketus | Näppäimistö |
 |---|---|---|
 | Lähtö, ponnistus, alastulo | iso painike tai napautus ruutuun | välilyönti / Enter |
-| Nojaa eteen / taakse liidossa | ▼ / ▲ | ↓ / ↑ (myös → / ←, S / W) |
+| Nojaa eteen / taakse vauhtimäessä (kyykky) ja liidossa | ▼ / ▲ | ↓ / ↑ (myös → / ←, S / W) |
 
 ## Rakenne
 

@@ -1,7 +1,7 @@
 // Pelinaikainen HUD canvasille: tuuli, nopeus, ponnistuspalkki, asentomittari, viestit.
 
 import { Phase } from '../jump.js';
-import { TAKEOFF, FLIGHT, WIND, BAND, DEG } from '../config.js';
+import { INRUN, TAKEOFF, FLIGHT, WIND, BAND, DEG } from '../config.js';
 import { takeoffQuality, lateTakeoffQuality } from '../physics.js';
 import { clamp } from '../util.js';
 
@@ -25,6 +25,26 @@ function panel(ctx, x, y, w, h) {
 
 function qualityColor(q) {
   return q >= 0.9 ? GOOD : q >= 0.6 ? WARN : BAD;
+}
+
+/** Leveässä (selain)näkymässä asentomittari on keskellä ponnistuspalkin paikalla, kapeassa oikeassa reunassa. */
+const isWide = ({ W, H }) => W > H;
+const BAR_Y = 104;          // ponnistuspalkin yläreuna turva-alueesta (px)
+const GAUGE_SHOW = 0.35;    // asentomittari tulee näkyviin näin pian ponnistuksen jälkeen (s)
+
+function gaugeRect({ W, H, top }) {
+  const gh = Math.min(170, H * 0.24), gw = 16;
+  return isWide({ W, H })
+    ? { x: W / 2 - gw / 2 - 7, y: top + BAR_Y + 16, gw, gh }
+    : { x: W - 12 - 30, y: top + BAR_Y + 54, gw, gh };
+}
+
+/** Vauhtimäessä ponnistuspalkki on keskellä: leveässä näkymässä tasapainomittari sen oikealla puolella. */
+function balanceRect(view) {
+  const r = gaugeRect(view);
+  if (!isWide(view)) return r;
+  const bw = Math.min(view.W - 32, 360);
+  return { ...r, x: Math.min(view.W / 2 + bw / 2 + 28, view.W - 12 - 30), y: view.top + BAR_Y + 16 };
 }
 
 /** Arvio ajasta maakosketukseen (s), tai Infinity. */
@@ -61,8 +81,11 @@ export class Hud {
     this.drawInfo(view, jump);
 
     const inAir = jump.phase === Phase.FLIGHT;
-    if (jump.phase === Phase.INRUN || (inAir && jump.t < 1.3)) this.drawTakeoffBar(view, jump);
-    if (inAir && jump.t > 0.35) this.drawAoaGauge(view, jump, wind);
+    // Leveässä näkymässä mittari korvaa ponnistuspalkin heti kun se tulee näkyviin
+    const barUntil = isWide(view) ? GAUGE_SHOW : 1.3;
+    if (jump.phase === Phase.INRUN || (inAir && jump.t <= barUntil)) this.drawTakeoffBar(view, jump);
+    if (jump.phase === Phase.INRUN) this.drawBalanceGauge(view, jump);
+    if (inAir && jump.t > GAUGE_SHOW) this.drawAoaGauge(view, jump, wind);
     this.drawMessage(view, jump);
   }
 
@@ -156,7 +179,7 @@ export class Hud {
   // --- Ponnistuksen ajoituspalkki ---
   drawTakeoffBar({ W, top }, jump) {
     const ctx = this.ctx;
-    const bw = Math.min(W - 32, 360), bh = 20, x = (W - bw) / 2, y = top + 104;
+    const bw = Math.min(W - 32, 360), bh = 20, x = (W - bw) / 2, y = top + BAR_Y;
     const span = TAKEOFF.zone + TAKEOFF.lateZone;
     const uOf = (d) => clamp((TAKEOFF.zone - d) / span, 0, 1);
 
@@ -205,11 +228,42 @@ export class Hud {
     ctx.stroke();
   }
 
-  // --- Asentomittari: kohtauskulma ja tuulen mukaan liikkuva vihreä kaista ---
-  drawAoaGauge({ W, H, top }, jump, wind) {
+  // --- Kyykkymittari vauhtimäessä: osoitin pidetään vihreällä kaistalla ---
+  drawBalanceGauge(view, jump) {
     const ctx = this.ctx;
-    const gh = Math.min(170, H * 0.24), gw = 16, y = top + 104 + 54;
-    let x = W - 12 - 30;
+    const { x, y, gw, gh } = balanceRect(view);
+    const half = INRUN.balanceHalf, e = jump.balanceError;
+    const state = e <= 0 ? GOOD : e < 0.45 ? WARN : BAD;
+
+    panel(ctx, x - 10, y - 22, gw + 34, gh + 34);
+    ctx.strokeStyle = state;
+    ctx.lineWidth = 2;
+    ctx.beginPath(); ctx.roundRect(x - 10, y - 22, gw + 34, gh + 34, 10); ctx.stroke();
+    ctx.fillStyle = state;
+    ctx.font = `600 9px ${FONT}`;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'alphabetic';
+    ctx.fillText('KYYKKY', x + gw / 2 + 7, y - 9);
+
+    const yOf = (b) => y + gh / 2 - clamp(b, -1, 1) * (gh / 2);
+    ctx.fillStyle = '#7a2e39';
+    ctx.beginPath(); ctx.roundRect(x, y, gw, gh, 5); ctx.fill();
+    ctx.fillStyle = '#2f9e52';
+    ctx.fillRect(x, yOf(half), gw, yOf(-half) - yOf(half));
+
+    const ny = yOf(jump.balance);
+    ctx.fillStyle = state;
+    ctx.beginPath();
+    ctx.moveTo(x + gw + 2, ny); ctx.lineTo(x + gw + 14, ny - 7); ctx.lineTo(x + gw + 14, ny + 7);
+    ctx.fill();
+    ctx.fillStyle = '#ffffff';
+    ctx.fillRect(x - 2, ny - 1.5, gw + 4, 3);
+  }
+
+  // --- Asentomittari: kohtauskulma ja tuulen mukaan liikkuva vihreä kaista ---
+  drawAoaGauge(view, jump, wind) {
+    const ctx = this.ctx;
+    const { x, y, gw, gh } = gaugeRect(view);
     const range = BAND.range;
     const err = jump.aoa - FLIGHT.aoaOpt; // + = kärjet ylempänä
     const c = jump.bandCenter, half = jump.bandHalf;
@@ -235,11 +289,15 @@ export class Hud {
     const yOf = (a) => y + gh / 2 - (clamp(a, -range, range) / range) * (gh / 2);
     ctx.fillStyle = '#7a2e39';
     ctx.beginPath(); ctx.roundRect(x, y, gw, gh, 5); ctx.fill();
+    // Takareunan yläpuolella noste hiipuu loivasti (keltainen), etureunan alla se romahtaa (punainen)
     ctx.fillStyle = '#9a7b1f';
-    const warn = half + 6 * DEG;
-    ctx.fillRect(x, yOf(c + warn), gw, yOf(c - warn) - yOf(c + warn));
+    ctx.fillRect(x, yOf(c + half + 6 * DEG), gw, yOf(c + half) - yOf(c + half + 6 * DEG));
     ctx.fillStyle = '#2f9e52';
     ctx.fillRect(x, yOf(c + half), gw, yOf(c - half) - yOf(c + half));
+    // Herkkukaista etureunassa: paras noste aivan reunalla
+    const sweet = Math.min(BAND.sweet, half);
+    ctx.fillStyle = '#8dffab';
+    ctx.fillRect(x, yOf(c - half + sweet), gw, yOf(c - half) - yOf(c - half + sweet));
 
     const ny = yOf(err);
     ctx.fillStyle = state;
@@ -266,15 +324,19 @@ export class Hud {
       case Phase.INRUN:
         if (jump.takeoff.pressed) ({ text, color } = takeoffLabel(jump));
         else if (jump.d <= TAKEOFF.zone) { text = 'PONNISTA NOKALLA!'; color = WARN; }
-        else text = 'Valmistaudu ponnistukseen';
+        else if (jump.balance > INRUN.balanceHalf) { text = '▼ nojaa eteen'; color = WARN; }
+        else if (jump.balance < -INRUN.balanceHalf) { text = '▲ nojaa taakse'; color = WARN; }
+        else text = 'Pidä kyykky kaistalla';
         break;
       case Phase.FLIGHT:
+        // Leveässä näkymässä mittari on keskellä: viestit sen alle
+        if (isWide(view) && jump.t > GAUGE_SHOW) { const g = gaugeRect(view); y = g.y + g.gh + 36; }
         if (jump.t < 1.3) ({ text, color } = takeoffLabel(jump));
         else if (!jump.landPrep && timeToGround(jump) < 0.55) { text = 'ALASTULO!'; color = GOOD; size = 22; }
         else if (!jump.landPrep) {
           const err = jump.aoa - FLIGHT.aoaOpt - jump.bandCenter;
-          if (err > 6 * DEG) { text = '▼ nojaa eteen'; color = WARN; }
-          else if (err < -6 * DEG) { text = '▲ nojaa taakse'; color = WARN; }
+          if (err > jump.bandHalf + 1 * DEG) { text = '▼ nojaa eteen'; color = WARN; }
+          else if (err < -jump.bandHalf) { text = '▲ nojaa taakse'; color = BAD; }
         }
         break;
       case Phase.SLIDE:

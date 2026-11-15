@@ -157,7 +157,7 @@ export class Ui {
       this.btnAction.disabled = !label;
       this.lastLabel = label;
     }
-    const lean = jump.phase === Phase.FLIGHT && !jump.landPrep;
+    const lean = jump.phase === Phase.INRUN || (jump.phase === Phase.FLIGHT && !jump.landPrep);
     if (lean !== this.lastLean) {
       this.btnFwd.disabled = this.btnBack.disabled = !lean;
       this.lastLean = lean;
