@@ -1,0 +1,26 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <defs>
+    <linearGradient id="sky" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#2f6fb0"/>
+      <stop offset="1" stop-color="#a9d3f0"/>
+    </linearGradient>
+  </defs>
+  <rect width="512" height="512" fill="url(#sky)"/>
+  <!-- rinne -->
+  <path d="M0 250 C120 262 230 330 330 420 C380 462 440 478 512 480 L512 512 L0 512 Z" fill="#ffffff"/>
+  <path d="M0 250 C120 262 230 330 330 420 C380 462 440 478 512 480" fill="none" stroke="#c4d8e8" stroke-width="6"/>
+  <!-- hyppääjä -->
+  <g transform="translate(250 215) rotate(-8)" stroke-linecap="round" fill="none">
+    <path d="M-95 34 L128 34" stroke="#ffcf33" stroke-width="13"/>
+    <path d="M-10 30 L28 2 L70 -22" stroke="#e2383f" stroke-width="26"/>
+    <path d="M70 -22 L128 -42" stroke="#e2383f" stroke-width="34"/>
+    <path d="M122 -40 L66 -8" stroke="#a8242b" stroke-width="14"/>
+    <circle cx="150" cy="-50" r="19" fill="#1d3557" stroke="none"/>
+  </g>
+  <!-- tuuliviivat -->
+  <g stroke="#ffffff" stroke-width="9" stroke-linecap="round" opacity="0.85">
+    <path d="M300 110 H400"/>
+    <path d="M340 142 H420"/>
+    <path d="M110 120 H170"/>
+  </g>
+</svg>

@@ -1,0 +1,69 @@
+<!doctype html>
+<html lang="fi">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+  <meta name="theme-color" content="#0d1b2a">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="Tuulimäki">
+  <meta name="description" content="Tuulimäki – mäkihyppypeli selaimeen ja puhelimeen.">
+  <title>Tuulimäki</title>
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="icon" href="icons/icon.svg" type="image/svg+xml">
+  <link rel="apple-touch-icon" href="icons/icon-180.png">
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+  <canvas id="game" aria-label="Mäkihyppypeli"></canvas>
+  <div id="safe-probe" aria-hidden="true"></div>
+
+  <!-- Pelinaikaiset kosketuspainikkeet -->
+  <div id="controls" hidden>
+    <div class="lean">
+      <button id="btn-back" type="button" aria-label="Nojaa taakse"><span>▲</span><small>taakse</small></button>
+      <button id="btn-fwd" type="button" aria-label="Nojaa eteen"><span>▼</span><small>eteen</small></button>
+    </div>
+    <button id="btn-action" type="button">LÄHTÖ</button>
+  </div>
+
+  <!-- Alkuruutu -->
+  <section id="title" class="overlay">
+    <div class="card">
+      <h1>Tuulimäki</h1>
+      <p class="hill">Tuulivaara · K 120 · HS 134</p>
+      <ol class="howto">
+        <li><b>Lähtö</b> – seuraa tuulta ja lähde, kun vastatuuli on hyvä.</li>
+        <li><b>Ponnistus</b> – paina juuri hyppyrin nokalla.</li>
+        <li><b>Liito</b> – pidä asentomittari vihreällä: ▼ eteen, ▲ taakse.</li>
+        <li><b>Alastulo</b> – paina hetkeä ennen maata, niin saat telemarkin.</li>
+      </ol>
+      <p class="keys">Näppäimet: välilyönti ja nuolet ↑ ↓</p>
+      <button id="btn-start" class="primary" type="button">Aloita</button>
+      <p id="title-best" class="best"></p>
+    </div>
+  </section>
+
+  <!-- Tulos -->
+  <section id="result" class="overlay bottom" hidden>
+    <div class="card">
+      <p id="res-outcome" class="outcome"></p>
+      <p id="res-distance" class="distance"></p>
+      <dl>
+        <div><dt>Pituuspisteet</dt><dd id="res-distpts"></dd></div>
+        <div><dt>Tyylipisteet</dt><dd id="res-style"></dd></div>
+        <div class="total"><dt>Yhteensä</dt><dd id="res-total"></dd></div>
+      </dl>
+      <p id="res-deductions" class="fine"></p>
+      <p class="fine">Ponnistus <b id="res-takeoff"></b> · nopeus nokalla <b id="res-speed"></b></p>
+      <p id="res-record" class="record"></p>
+      <button id="btn-again" class="primary" type="button">Uusi hyppy</button>
+    </div>
+  </section>
+
+  <div id="rotate" aria-hidden="true"><p>Käännä puhelin pystyasentoon</p></div>
+
+  <script type="module" src="js/main.js"></script>
+</body>
+</html>
