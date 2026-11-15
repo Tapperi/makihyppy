@@ -119,7 +119,7 @@ export const BAND = {
 
 /** Globaali tulostaulu (worker/). Tyhjä url = tulostaulu pois päältä. */
 export const LEADERBOARD = {
-  url: '', // esim. 'https://tuulimaki-scores.<tilisi>.workers.dev' – näkyy `wrangler deploy` -komennon tulosteessa
+  url: 'https://tuulimaki-scores.tapperi.workers.dev', // näkyy `wrangler deploy` -komennon tulosteessa
 };
 
 export const GATE_TIME = 20; // lähtöaika sekunteina, sen jälkeen hyppääjä lähtee itse
