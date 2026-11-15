@@ -33,6 +33,9 @@ export class Ui {
     this.lastLean = null;
     this.board = $('board');
     this.nameDialog = $('name-dialog');
+    this.tabloid = $('tabloid');
+    this.photo = $('tab-photo');
+    window.addEventListener('resize', () => this.fitTabloid());
     this.nameAsk = null;   // {validate, resolve} kun nimeä kysytään
     this.boardView = null;   // {fetchTop, myName, season, current} kun tulostaulu on avattu
     $('btn-board-close').addEventListener('click', () => { this.board.hidden = true; });
@@ -52,8 +55,61 @@ export class Ui {
     });
   }
 
-  /** Tulostaulu tai nimikysely on auki – pelin omat painallukset eivät saa mennä läpi. */
-  get modalOpen() { return !this.board.hidden || !this.nameDialog.hidden; }
+  /** Tulostaulu, nimikysely tai lehden etusivu on auki – pelin omat painallukset eivät saa mennä läpi. */
+  get modalOpen() { return !this.board.hidden || !this.nameDialog.hidden || this.tabloidOpen; }
+
+  get tabloidOpen() { return !this.tabloid.hidden; }
+
+  /** Lehden etusivun napautus (sulkeminen hoidetaan main.js:ssä). */
+  onTabloid(fn) { this.tabloid.addEventListener('click', fn); }
+
+  /**
+   * Kopioi pelikuvasta "lehtikuvan" etusivulle.
+   * @param rect {x, y, w, h} lähdealue canvasin pikseleinä
+   */
+  capturePhoto(canvas, rect) {
+    const p = this.photo;
+    // Pidä alue kuvan sisällä: osa selaimista ei piirrä mitään, jos lähde ylittää reunan
+    const w = Math.min(rect.w, canvas.width), h = Math.min(rect.h, canvas.height);
+    const x = Math.max(0, Math.min(rect.x, canvas.width - w)), y = Math.max(0, Math.min(rect.y, canvas.height - h));
+    try {
+      p.getContext('2d').drawImage(canvas, x, y, w, h, 0, 0, p.width, p.height);
+    } catch { /* kuva jää tyhjäksi – etusivu toimii silti */ }
+  }
+
+  /** Näyttää Iltapulun etusivun. page = makeTabloid()-olio. */
+  showTabloid(page) {
+    $('tab-date').textContent = page.date;
+    $('tab-kicker').textContent = page.kicker;
+    $('tab-who').textContent = page.who;
+    $('tab-headline').textContent = page.headline;
+    $('tab-caption').textContent = page.caption;
+    $('tab-burst').textContent = page.burst;
+    $('tab-injuries').replaceChildren(...page.injuries.map((text) => {
+      const li = document.createElement('li');
+      li.textContent = text;
+      return li;
+    }));
+    $('tab-strap').textContent = page.strap;
+    $('tab-quote').textContent = page.quote;
+    this.tabloid.hidden = false;
+    this.fitTabloid();
+  }
+
+  /** Skaalaa lehden täyttämään ruudun: isolla näytöllä iso, pienellä puhelimella kokonaan näkyvissä. */
+  fitTabloid() {
+    if (this.tabloid.hidden) return;
+    const paper = this.tabloid.querySelector('.paper');
+    paper.style.zoom = 1;
+    const cs = getComputedStyle(this.tabloid);
+    const availW = this.tabloid.clientWidth - parseFloat(cs.paddingLeft) - parseFloat(cs.paddingRight);
+    const availH = this.tabloid.clientHeight - parseFloat(cs.paddingTop) - parseFloat(cs.paddingBottom) - 36; // "Napauta jatkaaksesi"
+    // 0.96: lehti on hieman vinossa, kulmat tarvitsevat tilaa
+    const scale = Math.min(availW / paper.offsetWidth, availH / paper.offsetHeight) * 0.96;
+    paper.style.zoom = Math.max(0.5, Math.min(scale, 3));
+  }
+
+  hideTabloid() { this.tabloid.hidden = true; }
 
   /** Näyttää Tulostaulu-painikkeet (vain kun tulostaulu on käytössä). */
   onBoard(fn) {
@@ -148,6 +204,7 @@ export class Ui {
   }
 
   showGame() {
+    this.tabloid.hidden = true;
     this.title.hidden = true;
     this.result.hidden = true;
     this.controls.hidden = false;

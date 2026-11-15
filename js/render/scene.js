@@ -45,6 +45,11 @@ export class Scene {
     this.camH = 0;         // kaatuessa kamera seuraa pomppuja vain osittain
     this.zoom = 1;         // kaatuessa kamera zoomaa lähemmäs
     this.punch = 0;        // iskun aiheuttama lisäzoomin nytkähdys, vaimenee
+    // Lehtikuva kaatumisesta: otetaan hetki kovimman iskun jälkeen (main.js kopioi kuvan, kun photoDue)
+    this.photoTimer = -1;
+    this.photoBest = 0;
+    this.photoDue = false;
+    this.photoTaken = false;
     this.buildStatic();
   }
 
@@ -118,6 +123,7 @@ export class Scene {
     this.shake = 0; this.flash = 0; this.hitStop = 0; this.camH = 0;
     this.zoom = 1; this.punch = 0;
     this.scale = this.baseScale ?? this.scale;
+    this.photoTimer = -1; this.photoBest = 0; this.photoDue = false; this.photoTaken = false;
     this.lastHits = jump.crashHits;
     this.lastPhase = jump.phase;
   }
@@ -151,6 +157,7 @@ export class Scene {
       if (!jump.airborne && jump.speed > 2 && Math.random() < dt * 140) this.spray(jump, 2, 0.7);
     } else if (jump.phase === Phase.SLIDE && this.lastPhase === Phase.FLIGHT) {
       this.spray(jump, jump.outcome === 'fall' ? 46 : 22, 1);
+      if (jump.outcome === 'fall') this.photoTimer = 0.12;
     } else if (jump.phase === Phase.SLIDE && jump.speed > 3 && (jump.outcome === 'fall' || jump.s > this.hill.brakeStart)) {
       if (Math.random() < dt * 90) this.spray(jump, 1, 0.5);
     }
@@ -258,6 +265,8 @@ export class Scene {
     if (jump.crashHits > this.lastHits) this.crashHit(jump);
     this.lastHits = jump.crashHits;
 
+    if (this.photoTimer >= 0 && (this.photoTimer -= dt) < 0) this.photoDue = true;
+
     this.shake *= Math.exp(-dt * 7);
     this.flash *= Math.exp(-dt * 9);
     // Kamera zoomaa kaatujaan ja nytkähtää jokaisesta iskusta
@@ -303,6 +312,10 @@ export class Scene {
     if (p > 0.45) this.hitStop = Math.max(this.hitStop, 0.03 + 0.07 * p);
     this.bursts.push({ x: jump.x, y: jump.y + 0.5, age: 0, life: 0.2 + 0.12 * p, p, rot: Math.random() * 6.28 });
     this.sprite.jolt();
+    if (jump.crashImpact > this.photoBest) {
+      this.photoBest = jump.crashImpact;
+      this.photoTimer = 0.08;
+    }
     if (this.sprite.skis) {
       this.sprite.skis = false;
       for (let i = 0; i < 2; i++) {
@@ -316,6 +329,14 @@ export class Scene {
         });
       }
     }
+  }
+
+  /** Lehtikuvan rajaus hyppääjän ympäriltä canvasin pikseleinä. aspect = leveys / korkeus. */
+  photoRect(jump, aspect) {
+    const w = 12 * this.scale, h = w / aspect;
+    const x = this.sx(jump.x) - w * 0.45, y = this.sy(jump.y) - h * 0.62;
+    this.photoTaken = true;
+    return { x: x * this.dpr, y: y * this.dpr, w: w * this.dpr, h: h * this.dpr };
   }
 
   spray(jump, count, power) {

@@ -200,6 +200,108 @@ dl .total dd { color: var(--accent); font-weight: 900; }
 .online { margin: -6px 0 14px; font-size: 13px; color: var(--muted); }
 .online.good { color: var(--good); font-weight: 700; }
 
+/* --- Iltapulun etusivu --- */
+#tabloid {
+  flex-direction: column;
+  gap: 10px;
+  background: rgba(13, 27, 42, 0.9); /* tulospaneeli ei saa kuultaa lehden alta */
+  z-index: 4;
+  cursor: pointer;
+}
+.paper {
+  --red: #e2001a;
+  --yellow: #ffe600;
+  display: flex;
+  flex-direction: column;
+  /* Suunniteltu 360 px leveäksi; ui.js skaalaa koko lehden ruutuun sopivaksi (zoom) */
+  flex: none;
+  width: 360px;
+  overflow: hidden;
+  padding: 0 0 8px;
+  color: #111;
+  background: #fbfaf5;
+  box-shadow: 0 18px 50px rgba(0, 0, 0, 0.55), 0 0 0 1px rgba(0, 0, 0, 0.25);
+  text-align: left;
+  transform: rotate(-1.6deg);
+  animation: paper-in 0.5s cubic-bezier(0.2, 0.9, 0.3, 1.15) both;
+}
+@keyframes paper-in {
+  from { transform: rotate(-540deg) scale(0.05); opacity: 0; }
+  to { transform: rotate(-1.6deg) scale(1); opacity: 1; }
+}
+@media (prefers-reduced-motion: reduce) { .paper { animation: none; } }
+
+.paper header {
+  display: flex; align-items: center; justify-content: space-between; gap: 8px;
+  padding: 6px 10px 5px;
+  color: #fff;
+  background: var(--red);
+}
+.paper .logo {
+  font-family: "Arial Black", "Helvetica Neue", Arial, sans-serif;
+  font-size: 34px; font-weight: 900; font-style: italic;
+  letter-spacing: -0.045em; line-height: 1;
+}
+.paper .meta { font-size: 9.5px; font-weight: 700; line-height: 1.25; text-align: right; text-transform: capitalize; }
+
+.paper .kicker { margin: 8px 10px 0; }
+.paper .kicker span {
+  display: inline-block;
+  padding: 2px 7px;
+  color: #fff; background: #111;
+  font-size: 11px; font-weight: 800; text-transform: uppercase; letter-spacing: 0.05em;
+}
+.paper .who { margin: 5px 10px 0; font-size: 13px; font-weight: 800; color: var(--red); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.paper h2 {
+  margin: 0 10px 6px;
+  font-family: Impact, Haettenschweiler, "Arial Narrow Bold", "Arial Black", sans-serif;
+  font-size: 41px; font-weight: 900;
+  line-height: 0.95; letter-spacing: -0.01em;
+  text-transform: uppercase;
+  text-wrap: balance;
+}
+
+.paper figure { position: relative; flex: 0 1 auto; min-height: 70px; margin: 0 10px; overflow: hidden; background: #9db4c8; }
+.paper canvas { display: block; width: 100%; height: auto; filter: contrast(1.12) saturate(0.85); }
+.paper figcaption {
+  position: absolute; right: 0; bottom: 0;
+  padding: 1px 5px;
+  color: #fff; background: rgba(0, 0, 0, 0.6);
+  font-size: 8.5px;
+}
+.paper .burst {
+  position: absolute; left: 6px; top: 6px;
+  padding: 4px 8px;
+  color: var(--yellow); background: var(--red);
+  font-family: Impact, Haettenschweiler, "Arial Narrow Bold", "Arial Black", sans-serif;
+  font-size: 19px; text-transform: uppercase;
+  transform: rotate(-5deg);
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.4);
+}
+
+.paper .injuries { margin: 7px 10px 0; padding: 6px 10px 7px; background: var(--yellow); }
+.paper h3 { margin: 0 0 3px; font-size: 11px; font-weight: 900; text-transform: uppercase; letter-spacing: 0.06em; color: var(--red); }
+.paper ul { margin: 0; padding: 0; list-style: none; font-size: 13.5px; font-weight: 800; line-height: 1.28; }
+.paper li { padding-left: 13px; text-indent: -13px; }
+.paper li::before { content: "■ "; font-size: 8px; vertical-align: 2px; color: var(--red); }
+
+.paper .strap { margin: 6px 10px 0; font-size: 13px; font-weight: 800; font-style: italic; }
+.paper blockquote {
+  margin: 7px 10px 0;
+  padding: 5px 0 0;
+  border-top: 3px solid #111;
+  font-family: Georgia, "Times New Roman", serif;
+}
+.paper blockquote p { margin: 0; font-size: 15px; font-style: italic; line-height: 1.25; }
+.paper blockquote p::before { content: "“"; }
+.paper blockquote p::after { content: "”"; }
+.paper cite { display: block; margin-top: 1px; font-size: 11px; font-style: normal; font-weight: 700; text-align: right; }
+
+/* Tulospaneeli pysyy piilossa lehden alla, kunnes lehti suljetaan */
+body:has(#tabloid:not([hidden])) #result { visibility: hidden; }
+
+#tabloid .continue { margin: 0; font-size: 13px; font-weight: 700; color: var(--text); opacity: 0.85; }
+
 /* --- Tulostaulu ja nimen kysyminen --- */
 .overlay.modal { background: rgba(13, 27, 42, 0.6); z-index: 5; }
 .modal .card { display: flex; flex-direction: column; max-height: 100%; background: #0f1e2e; }

@@ -41,6 +41,7 @@ js/storage.js                 localStorage-kääre
 js/leaderboard.js             globaali tulostaulu: nimi + laitetunnus, tuloksen lähetys, top 50
 worker/                       tulostaulun palvelin (Cloudflare Worker + D1), ks. alla
 js/ui.js                      DOM-valikot ja tulospaneeli
+js/tabloid.js                 Iltapulun etusivu kaatumisen jälkeen: arvotut otsikot, vammat ja lainaukset
 js/render/scene.js            maailman piirto ja kamera
 js/render/jumper.js           hyppääjän asennot ja piirto
 js/render/hud.js              tuulimittari, ponnistuspalkki, asentomittari

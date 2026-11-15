@@ -11,6 +11,7 @@ import { Ui } from './ui.js';
 import { getBest, recordJump } from './storage.js';
 import { makeRng } from './util.js';
 import * as lb from './leaderboard.js';
+import { makeTabloid } from './tabloid.js';
 
 const RESULT_DELAY = 2.4;   // tulospaneeli näin pian alastulon jälkeen (s)
 const FALL_DELAY = 12;      // kaatuessa odotetaan, että lumipallo pysähtyy (enintään näin kauan)
@@ -18,6 +19,7 @@ const FALL_SKIP = 1;        // tämän jälkeen painallus ohittaa pyörimisen (s
 const CRASH_DELAY = 16;     // vauhtimäessä tai ilmassa kaatunut kierii alas enintään näin kauan (s)
 const CRASH_SKIP = 2;       // tämän jälkeen painallus ohittaa kierimisen (s)
 const AGAIN_GUARD = 0.7;    // estää vahinkopainalluksen ohittamasta tuloksia (s)
+const TABLOID_GUARD = 1.2;  // Iltapulun etusivun saa suljettua vasta tämän jälkeen (s)
 
 const canvas = document.getElementById('game');
 const hill = createHill(HILLS.tuulivaara);
@@ -56,10 +58,33 @@ function newJump() {
 function finishJump(now) {
   const record = recordJump(hill.def.id, jump.result);
   ui.showResult(jump.result, record);
+  if (jump.result.outcome === 'fall') {
+    // Kaatumisesta kertoo ensin Iltapulun etusivu; tulokset odottavat sen alla
+    if (!scene.photoTaken) takePhoto();
+    ui.showTabloid(makeTabloid({
+      kind: jump.crash ?? 'landing',
+      kmh: jump.result.takeoffSpeed * 3.6,
+      hits: jump.crashHits,
+      name: lb.playerName(),
+    }));
+  }
   mode = 'result';
   resultShownAt = now;
   input.clear();
   submitOnline(jump.result);
+}
+
+/** Kopioi pelikuvasta lehtikuvan etusivulle. */
+function takePhoto() {
+  ui.capturePhoto(canvas, scene.photoRect(jump, ui.photo.width / ui.photo.height));
+}
+
+/** Sulkee lehden etusivun, jolloin tulospaneeli tulee esiin. */
+function closeTabloid(now) {
+  if (!ui.tabloidOpen || now - resultShownAt < TABLOID_GUARD) return;
+  ui.hideTabloid();
+  resultShownAt = now; // sama painallus ei saa aloittaa uutta hyppyä
+  input.clear();
 }
 
 /** Alkuruudun Aloita: nimi kysytään kerran ennen ensimmäistä hyppyä. */
@@ -129,14 +154,20 @@ function frame(ts) {
         || (sliding && fell && pressed && jump.t > FALL_SKIP)
         || (crashed && (jump.t > CRASH_DELAY || (pressed && jump.t > CRASH_SKIP)));
       if (landed) finishJump(now);
-    } else if (input.takeAction() && !ui.modalOpen && now - resultShownAt > AGAIN_GUARD) {
-      newJump();
+    } else if (input.takeAction()) {
+      if (ui.tabloidOpen) closeTabloid(now);
+      else if (!ui.modalOpen && now - resultShownAt > AGAIN_GUARD) newJump();
     }
     ui.sync(jump);
   }
 
   scene.update(jump, wind, dt);
   scene.draw(jump, wind);
+  if (scene.photoDue) {
+    // Ennen HUDia, jotta kuvaan tulee vain maisema ja hyppääjä
+    scene.photoDue = false;
+    takePhoto();
+  }
   view.resultOpen = mode === 'result';
   if (mode !== 'title') hud.draw(view, jump, wind);
   requestAnimationFrame(frame);
@@ -146,6 +177,7 @@ function frame(ts) {
 input.attach({ canvas, btnAction: ui.btnAction, btnFwd: ui.btnFwd, btnBack: ui.btnBack });
 ui.onStart(start);
 if (lb.enabled) ui.onBoard(() => ui.showBoard((season) => lb.fetchTop(hill.def.id, season), lb.playerName()));
+ui.onTabloid(() => closeTabloid(performance.now() / 1000));
 ui.onAgain(() => { if (!ui.modalOpen && performance.now() / 1000 - resultShownAt > 0.25) newJump(); });
 window.addEventListener('resize', resize);
 window.addEventListener('orientationchange', resize);

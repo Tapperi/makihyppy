@@ -15,6 +15,30 @@ const snap = async (name) => { if (shots) await page.screenshot(join(shots, `${n
 const G = 'window.__game';
 const log = (...a) => console.log('  ', ...a);
 
+/** Kaatumisen jälkeen: Iltapulun etusivu on tulosten päällä, kunnes sitä napautetaan. */
+async function readTabloid(name) {
+  const text = (id) => page.eval(`document.getElementById('${id}').textContent`);
+  assert.equal(await page.eval(`document.getElementById('tabloid').hidden`), false, 'Iltapulun etusivu näkyy');
+  assert.ok((await text('tab-headline')).length > 5, 'otsikko');
+  const injuries = await page.eval(`[...document.querySelectorAll('#tab-injuries li')].map((li) => li.textContent)`);
+  assert.ok(injuries.length >= 5 && injuries.some((t) => /hammas|hampaat/i.test(t)), `vammalista: ${injuries.join('; ')}`);
+  assert.match(await text('tab-burst'), /^\d+ luuta poikki!$/);
+  assert.ok((await text('tab-quote')).length > 5, 'lainaus');
+  // Lehtikuva on kopioitu pelistä: ei pelkkää tyhjää
+  assert.ok(await page.eval(`(() => { const c = document.getElementById('tab-photo');
+    const d = c.getContext('2d').getImageData(0, 0, c.width, c.height).data;
+    for (let i = 3; i < d.length; i += 4000) if (d[i]) return true; return false; })()`), 'lehtikuva');
+  await page.touch(195, 400); // liian aikainen napautus ei sulje
+  assert.equal(await page.eval(`document.getElementById('tabloid').hidden`), false);
+  await sleep(1300);
+  await snap(name);
+  log(`Iltapulu: ${await text('tab-headline')} – ${injuries.length} vammaa – ”${await text('tab-quote')}”`);
+  await page.touch(195, 400);
+  await page.until(`document.getElementById('tabloid').hidden`, 2000);
+  assert.equal(await page.eval(`${G}.mode`), 'result', 'napautus sulki vain lehden');
+  await sleep(800);
+}
+
 /** Ajaa vauhtimäkeä kyykky kaistalla (nuolinäppäimillä), kunnes ehto täyttyy tai vauhtimäki loppuu. */
 async function rideInrun(until = 'false') {
   await page.until(`${G}.jump.phase !== 'ready'`); // lähtöpainallus ehtii perille
@@ -140,6 +164,7 @@ try {
   await page.until(`${G}.mode === 'result'`);
   assert.ok(await page.eval(`${G}.jump.ballRadius`) > 2, 'alhaalla on iso lumipallo');
   await sleep(300);
+  await readTabloid('11-iltapulu-lumipallo');
   await snap('11-tulos-kaatuminen');
 
   // --- Hyppy 3: alastulo kosketuspainikkeella, lähtö ajan loppumisella ---
@@ -193,6 +218,7 @@ try {
   await page.until(`${G}.mode === 'result'`, 3000);
   assert.equal(await page.eval(`document.getElementById('res-outcome').textContent`), 'Kaatuminen vauhtimäessä');
   assert.equal(await page.eval(`document.getElementById('res-total').textContent`), '0,0');
+  await readTabloid('18-iltapulu-vauhtimaki');
   await snap('18-tulos-kaatuminen-vauhtimaki');
 
   // --- Hyppy 5: kärjet liian ylhäällä liian kauan -> hallinta menee ilmassa ---
@@ -222,6 +248,7 @@ try {
   assert.equal(r5.crash, 'flight');
   assert.ok(r5.distance > 0 && r5.distance < r1.distance, 'pituus mitataan putoamiskohdasta');
   assert.equal(await page.eval(`document.getElementById('res-outcome').textContent`), 'Kaatuminen ilmassa');
+  await readTabloid('24-iltapulu-ilmassa');
   await snap('24-tulos-kaatuminen-ilmassa');
 
   // ---------- PWA ----------
