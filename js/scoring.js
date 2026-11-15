@@ -2,7 +2,7 @@
 // Vaiheessa 1 tyyli on yksi arvosana (0–20) kolminkertaisena. Vaiheessa 3 tämä
 // korvataan viidellä tuomarilla – rajapinta (scoreJump) pysyy samana.
 
-import { LANDING, DEG } from './config.js';
+import { LANDING, CRASH, DEG } from './config.js';
 import { clamp, roundHalf } from './util.js';
 
 export const Outcome = { TELEMARK: 'telemark', TWOFOOT: 'twofoot', FALL: 'fall' };
@@ -13,7 +13,7 @@ export function distancePoints(hill, distance) {
 
 /**
  * @param hill
- * @param j {distance, outcome, avgAoaError (rad), prepTime (s), impact (m/s)}
+ * @param j {distance, outcome, avgAoaError (rad), prepTime (s), impact (m/s), crash (hallinta meni ilmassa)}
  */
 export function scoreJump(hill, j) {
   const deductions = [];
@@ -26,6 +26,7 @@ export function scoreJump(hill, j) {
   const hard = clamp((j.impact - 5.5) * 0.5, 0, 1.5);
   if (j.outcome === Outcome.FALL) {
     add('Kaatuminen', 8);
+    if (j.crash) add('Hallinnan menetys ilmassa', CRASH.flightPenalty);
   } else if (j.outcome === Outcome.TWOFOOT) {
     add('Tasajalka-alastulo', 2.5);
     add('Kova alastulo', hard);
@@ -46,5 +47,20 @@ export function scoreJump(hill, j) {
     distancePoints: Math.round(dist * 10) / 10,
     total: Math.round(Math.max(0, dist + style) * 10) / 10,
     deductions,
+    crash: j.crash ? 'flight' : null,
+  };
+}
+
+/** Vauhtimäessä kaatunut ei pääse nokalle asti: ei pituutta eikä pisteitä. */
+export function scoreInrunCrash() {
+  return {
+    distance: 0,
+    outcome: Outcome.FALL,
+    judge: 0,
+    style: 0,
+    distancePoints: 0,
+    total: 0,
+    deductions: [{ label: 'Kaatuminen vauhtimäessä', amount: 20 }],
+    crash: 'inrun',
   };
 }

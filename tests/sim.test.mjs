@@ -49,13 +49,51 @@ test('ponnistuksen ajoitus ratkaisee', () => {
 test('vauhtimäki: kyykyn pitäminen kaistalla antaa täyden vauhdin, huono asento hidastaa', () => {
   assert.ok(inrunAccel(24, 0.5, 0, 1) < inrunAccel(24, 0.5, 0, 0));
   for (let seed = 1; seed <= 5; seed++) {
-    const good = runJump(hill, fixedWind(0), {}, seed), idle = runJump(hill, fixedWind(0), { balance: false }, seed);
+    // Huono kyykky: osoitin punaisella, mutta ei kaatumisalueella asti
+    const good = runJump(hill, fixedWind(0), {}, seed), poor = runJump(hill, fixedWind(0), { balance: 0.6 }, seed);
     const perfect = runJump(hill, fixedWind(0), {}, 1).jump.takeoffSpeed;
     assert.ok(Math.abs(good.jump.takeoffSpeed - perfect) < 0.01, 'hyvä botti ei menetä vauhtia');
-    const lost = (good.jump.takeoffSpeed - idle.jump.takeoffSpeed) * 3.6;
-    assert.ok(lost > 0.5 && lost < 2, `ohjaamatta menettää ${lost.toFixed(2)} km/h`);
-    assert.ok(good.result.distance - idle.result.distance > 3);
+    assert.equal(poor.jump.crash, null, 'punaisella käyminen ei vielä kaada');
+    const lost = (good.jump.takeoffSpeed - poor.jump.takeoffSpeed) * 3.6;
+    assert.ok(lost > 0.5 && lost < 2, `huonolla kyykyllä menettää ${lost.toFixed(2)} km/h`);
+    assert.ok(good.result.distance - poor.result.distance > 3);
   }
+});
+
+test('vauhtimäki: ohjaamatta osoitin jää kaatumisalueelle ja hyppääjä kaatuu ilman tulosta', () => {
+  let crashed = 0;
+  for (let seed = 1; seed <= 20; seed++) {
+    const { jump, result } = runJump(hill, fixedWind(0), { balance: false }, seed);
+    if (jump.crash !== 'inrun') continue;
+    crashed++;
+    assert.equal(jump.phase, 'done', 'kieriminen päättyy');
+    assert.equal(result.outcome, 'fall');
+    assert.equal(result.crash, 'inrun');
+    assert.equal(result.distance, 0);
+    assert.equal(result.total, 0);
+    assert.equal(jump.touchdown, null, 'ei alastulomerkkiä');
+    assert.ok(jump.crashHits >= 3, `iskuja ${jump.crashHits}`);
+    assert.ok(jump.x > 0 && jump.x < hill.endX, `kierii nokan yli rinteeseen (x = ${jump.x.toFixed(0)})`);
+  }
+  assert.ok(crashed >= 16, `kaatui ${crashed}/20`);
+});
+
+test('lento: liian kauan kaatumisalueella = hallinta menee ja hyppääjä putoaa rinteeseen', () => {
+  const good = runJump(hill, fixedWind(0)).result;
+  for (const lean of [-1, 1]) { // kärjet liian ylhäällä / sukellus
+    const { jump, result } = runJump(hill, fixedWind(0), { steer: lean, landLead: null });
+    assert.equal(jump.crash, 'flight', `nojaus ${lean}`);
+    assert.equal(jump.phase, 'done');
+    assert.equal(result.outcome, 'fall');
+    assert.equal(result.crash, 'flight');
+    assert.ok(result.distance > 20 && result.distance < good.distance - 15, `pituus ${result.distance}`);
+    assert.equal(result.distance, jump.touchdown.distance);
+    assert.ok(result.deductions.some((d) => d.label === 'Hallinnan menetys ilmassa'));
+    assert.ok(result.style < 36, 'huonompi tyyli kuin tavallisessa kaatumisessa');
+    assert.ok(jump.crashHits >= 3 && jump.touchdown.impact > 3, `isku ${jump.touchdown.impact.toFixed(1)} m/s`);
+  }
+  // Pelkkä ohjaamatta jättäminen tyynessä ei kaada: osoitin jää keltaiselle
+  assert.equal(runJump(hill, fixedWind(0), { steer: false }).jump.crash, null);
 });
 
 test('asennon säätö kannattaa', () => {
@@ -96,6 +134,10 @@ test('sama siemen antaa saman hypyn', () => {
   const a = runJump(hill, new Wind(makeRng(5)), {}, 9).result;
   const b = runJump(hill, new Wind(makeRng(5)), {}, 9).result;
   assert.deepEqual(a, b);
+  // Myös kaatuminen pomppuineen toistuu samanlaisena
+  const c = runJump(hill, new Wind(makeRng(5)), { balance: false }, 3).jump;
+  const d = runJump(hill, new Wind(makeRng(5)), { balance: false }, 3).jump;
+  assert.deepEqual([c.crash, c.x, c.crashHits, c.roll], [d.crash, d.x, d.crashHits, d.roll]);
 });
 
 test('tuuli vaihtelee mutta pysyy rajoissa', () => {
@@ -114,7 +156,11 @@ test('tuuli vaihtelee mutta pysyy rajoissa', () => {
 
 test('vaihtelevassa tuulessa hyvä botti hyppää uskottavia pituuksia', () => {
   const ds = [];
-  for (let seed = 1; seed <= 40; seed++) ds.push(runJump(hill, new Wind(makeRng(seed)), {}, seed).result.distance);
+  for (let seed = 1; seed <= 40; seed++) {
+    const { jump, result } = runJump(hill, new Wind(makeRng(seed)), {}, seed);
+    assert.equal(jump.crash, null, 'hyvä botti ei kaadu');
+    ds.push(result.distance);
+  }
   const min = Math.min(...ds), max = Math.max(...ds);
   console.log(`      pituudet ${min}–${max} m, keskiarvo ${(ds.reduce((a, b) => a + b) / ds.length).toFixed(1)} m`);
   assert.ok(min > 95 && max < 142, `${min}..${max}`);

@@ -15,6 +15,8 @@ import * as lb from './leaderboard.js';
 const RESULT_DELAY = 2.4;   // tulospaneeli näin pian alastulon jälkeen (s)
 const FALL_DELAY = 12;      // kaatuessa odotetaan, että lumipallo pysähtyy (enintään näin kauan)
 const FALL_SKIP = 1;        // tämän jälkeen painallus ohittaa pyörimisen (s)
+const CRASH_DELAY = 16;     // vauhtimäessä tai ilmassa kaatunut kierii alas enintään näin kauan (s)
+const CRASH_SKIP = 2;       // tämän jälkeen painallus ohittaa kierimisen (s)
 const AGAIN_GUARD = 0.7;    // estää vahinkopainalluksen ohittamasta tuloksia (s)
 
 const canvas = document.getElementById('game');
@@ -71,7 +73,7 @@ async function start() {
 async function submitOnline(result) {
   const showing = () => mode === 'result' && jump.result === result;
   ui.setOnline('');
-  if (!lb.enabled || !lb.playerName()) return;
+  if (!lb.enabled || !lb.playerName() || result.total <= 0) return; // nollatulosta ei lähetetä
   for (;;) {
     if (nameProblem) {
       if (!showing()) return;
@@ -107,7 +109,9 @@ function frame(ts) {
     wind.update(dt);
     input.takeAction();
   } else {
-    acc += dt;
+    // Kova isku pysäyttää pelin silmänräpäykseksi: tälli tuntuu
+    if (scene.hitStop > 0) scene.hitStop -= dt;
+    else acc += dt;
     let pressed = false;
     while (acc >= STEP) {
       const inp = mode === 'play' ? input.poll() : { action: false, lean: 0 };
@@ -118,9 +122,12 @@ function frame(ts) {
     if (mode === 'play') {
       const sliding = jump.phase === Phase.SLIDE;
       const fell = jump.outcome === 'fall';
+      // Ilmassa kaatuneella ei ole tulosta ennen kuin hän putoaa rinteeseen
+      const crashed = jump.phase === Phase.CRASH && !!jump.result;
       const landed = jump.phase === Phase.DONE
         || (sliding && jump.t > (fell ? FALL_DELAY : RESULT_DELAY))
-        || (sliding && fell && pressed && jump.t > FALL_SKIP);
+        || (sliding && fell && pressed && jump.t > FALL_SKIP)
+        || (crashed && (jump.t > CRASH_DELAY || (pressed && jump.t > CRASH_SKIP)));
       if (landed) finishJump(now);
     } else if (input.takeAction() && !ui.modalOpen && now - resultShownAt > AGAIN_GUARD) {
       newJump();

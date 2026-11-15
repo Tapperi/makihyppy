@@ -9,6 +9,7 @@ const ACTION_LABEL = {
   [Phase.INRUN]: 'PONNISTA',
   [Phase.FLIGHT]: 'ALASTULO',
   [Phase.SLIDE]: '',
+  [Phase.CRASH]: '',
   [Phase.DONE]: '',
 };
 
@@ -155,7 +156,8 @@ export class Ui {
   get resultVisible() { return !this.result.hidden; }
 
   showResult(r, record) {
-    $('res-outcome').textContent = OUTCOME_TEXT[r.outcome];
+    $('res-outcome').textContent = r.crash === 'inrun' ? 'Kaatuminen vauhtimäessä'
+      : r.crash === 'flight' ? 'Kaatuminen ilmassa' : OUTCOME_TEXT[r.outcome];
     $('res-outcome').dataset.outcome = r.outcome;
     $('res-distance').textContent = `${fmt(r.distance)} m`;
     $('res-distpts').textContent = fmt(r.distancePoints);

@@ -68,8 +68,21 @@ export function createHill(def) {
     return (lo + (x - laX[lo]) / (laX[hi] - laX[lo])) * DS;
   }
 
+  /** x-koordinaatti (< 0) -> etäisyys nokalta rataa pitkin (puolitushaku, inX on laskeva). */
+  function inrunDistAtX(x) {
+    if (x >= 0) return 0;
+    if (x <= inX[inN - 1]) return (inN - 1) * DS;
+    let lo = 0, hi = inN - 1;
+    while (hi - lo > 1) {
+      const mid = (lo + hi) >> 1;
+      if (inX[mid] >= x) lo = mid; else hi = mid;
+    }
+    return (lo + (inX[lo] - x) / (inX[lo] - inX[hi])) * DS;
+  }
+
   const hill = {
     def,
+    endX: laX[laN - 1],
     name: def.name,
     k: def.k,
     hs: def.hs,
@@ -98,6 +111,18 @@ export function createHill(def) {
     },
     slopeAtX(x) {
       return landingAngleAt(def, distAtX(x));
+    },
+    /**
+     * Pinta kohdassa x: vauhtimäen latu (x < 0) tai alastulorinne. angle = lasku vaakatasosta.
+     * Nokalla (x = 0) pinta putoaa nokan korkeuden verran.
+     */
+    surfaceAt(x) {
+      if (x < 0) {
+        const d = inrunDistAtX(x);
+        return { y: sample(inY, d), angle: inrunAngleAt(def, d) };
+      }
+      const s = distAtX(x);
+      return { y: sample(laY, s), angle: landingAngleAt(def, s) };
     },
     /** Maasto vauhtimäen alla (piirtoa varten). */
     backGroundY(x) {

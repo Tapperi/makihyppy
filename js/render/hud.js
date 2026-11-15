@@ -1,7 +1,7 @@
 // Pelinaikainen HUD canvasille: tuuli, nopeus, ponnistuspalkki, asentomittari, viestit.
 
 import { Phase } from '../jump.js';
-import { INRUN, TAKEOFF, FLIGHT, WIND, BAND, DEG } from '../config.js';
+import { INRUN, TAKEOFF, FLIGHT, WIND, BAND, CRASH, DEG } from '../config.js';
 import { takeoffQuality, lateTakeoffQuality } from '../physics.js';
 import { clamp } from '../util.js';
 
@@ -13,6 +13,7 @@ if (typeof CanvasRenderingContext2D !== 'undefined' && !CanvasRenderingContext2D
 const FONT = 'system-ui, -apple-system, "Segoe UI", Roboto, sans-serif';
 const PANEL = 'rgba(13, 27, 42, 0.72)';
 const GOOD = '#52d273', WARN = '#ffd23f', BAD = '#ff5d5d';
+const RED_ZONE = '#7a2e39', CRASH_ZONE = '#e0102e'; // mittarin punainen ja sen kaatumisalue
 
 const fmt = (v) => v.toFixed(1).replace('.', ',');
 
@@ -70,6 +71,37 @@ export class Hud {
     this.ctx = ctx;
     this.barGradient = null;
     this.barKey = '';
+  }
+
+  /**
+   * Mittarin pohja: punainen palkki, jonka päissä kirkkaampi kaatumisalue (y-rajat ruudulla).
+   * Kaatumisvaaran kasvaessa alue vilkkuu.
+   */
+  gaugeBase(x, y, gw, gh, topEnd, bottomStart, jump) {
+    const ctx = this.ctx;
+    ctx.save();
+    ctx.beginPath(); ctx.roundRect(x, y, gw, gh, 5); ctx.clip();
+    ctx.fillStyle = RED_ZONE;
+    ctx.fillRect(x, y, gw, gh);
+    ctx.fillStyle = jump.danger > 0 && Math.sin(jump.t * 40) > 0 ? '#ffffff' : CRASH_ZONE;
+    if (topEnd > y) ctx.fillRect(x, y, gw, topEnd - y);
+    if (bottomStart < y + gh) ctx.fillRect(x, bottomStart, gw, y + gh - bottomStart);
+    ctx.restore();
+  }
+
+  /** Mittarin kehys: väri tilan mukaan, kaatumisvaarassa paksu ja vilkkuva. */
+  gaugeFrame(x, y, gw, gh, state, label, jump) {
+    const ctx = this.ctx, d = jump.danger;
+    panel(ctx, x - 10, y - 22, gw + 34, gh + 34);
+    const color = d > 0 ? (Math.sin(jump.t * 40) > 0 ? '#ffffff' : CRASH_ZONE) : state;
+    ctx.strokeStyle = color;
+    ctx.lineWidth = 2 + 4 * d;
+    ctx.beginPath(); ctx.roundRect(x - 10, y - 22, gw + 34, gh + 34, 10); ctx.stroke();
+    ctx.fillStyle = d > 0 ? color : state;
+    ctx.font = `600 9px ${FONT}`;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'alphabetic';
+    ctx.fillText(label, x + gw / 2 + 7, y - 9);
   }
 
   /**
@@ -235,19 +267,12 @@ export class Hud {
     const half = INRUN.balanceHalf, e = jump.balanceError;
     const state = e <= 0 ? GOOD : e < 0.45 ? WARN : BAD;
 
-    panel(ctx, x - 10, y - 22, gw + 34, gh + 34);
-    ctx.strokeStyle = state;
-    ctx.lineWidth = 2;
-    ctx.beginPath(); ctx.roundRect(x - 10, y - 22, gw + 34, gh + 34, 10); ctx.stroke();
-    ctx.fillStyle = state;
-    ctx.font = `600 9px ${FONT}`;
-    ctx.textAlign = 'center';
-    ctx.textBaseline = 'alphabetic';
-    ctx.fillText('KYYKKY', x + gw / 2 + 7, y - 9);
+    this.gaugeFrame(x, y, gw, gh, state, 'KYYKKY', jump);
 
     const yOf = (b) => y + gh / 2 - clamp(b, -1, 1) * (gh / 2);
-    ctx.fillStyle = '#7a2e39';
-    ctx.beginPath(); ctx.roundRect(x, y, gw, gh, 5); ctx.fill();
+    // Kaatumisalue: osoitin liian kauan täällä = hyppääjä kaatuu
+    const limit = half + CRASH.inrunError * INRUN.balanceErrFull;
+    this.gaugeBase(x, y, gw, gh, yOf(limit), yOf(-limit), jump);
     ctx.fillStyle = '#2f9e52';
     ctx.fillRect(x, yOf(half), gw, yOf(-half) - yOf(half));
 
@@ -276,19 +301,11 @@ export class Hud {
     ctx.save();
     if (alert > 0.02) ctx.translate(Math.sin(jump.t * 70) * 2.2 * alert, Math.cos(jump.t * 53) * 1.6 * alert);
 
-    panel(ctx, x - 10, y - 22, gw + 34, gh + 34);
-    ctx.strokeStyle = state;
-    ctx.lineWidth = 2;
-    ctx.beginPath(); ctx.roundRect(x - 10, y - 22, gw + 34, gh + 34, 10); ctx.stroke();
-    ctx.fillStyle = state;
-    ctx.font = `600 9px ${FONT}`;
-    ctx.textAlign = 'center';
-    ctx.textBaseline = 'alphabetic';
-    ctx.fillText('ASENTO', x + gw / 2 + 7, y - 9);
+    this.gaugeFrame(x, y, gw, gh, state, 'ASENTO', jump);
 
     const yOf = (a) => y + gh / 2 - (clamp(a, -range, range) / range) * (gh / 2);
-    ctx.fillStyle = '#7a2e39';
-    ctx.beginPath(); ctx.roundRect(x, y, gw, gh, 5); ctx.fill();
+    // Kaatumisalueet: takareunan yllä kauempana kuin etureunan alla
+    this.gaugeBase(x, y, gw, gh, yOf(c + half + CRASH.flightBack), yOf(c - half - CRASH.flightFront), jump);
     // Takareunan yläpuolella noste hiipuu loivasti (keltainen), etureunan alla se romahtaa (punainen)
     ctx.fillStyle = '#9a7b1f';
     ctx.fillRect(x, yOf(c + half + 6 * DEG), gw, yOf(c + half) - yOf(c + half + 6 * DEG));
@@ -323,6 +340,7 @@ export class Hud {
         break;
       case Phase.INRUN:
         if (jump.takeoff.pressed) ({ text, color } = takeoffLabel(jump));
+        else if (jump.danger > 0.2) { text = jump.balance > 0 ? '▼ KAATUMISVAARA!' : '▲ KAATUMISVAARA!'; color = BAD; size = 22; }
         else if (jump.d <= TAKEOFF.zone) { text = 'PONNISTA NOKALLA!'; color = WARN; }
         else if (jump.balance > INRUN.balanceHalf) { text = '▼ nojaa eteen'; color = WARN; }
         else if (jump.balance < -INRUN.balanceHalf) { text = '▲ nojaa taakse'; color = WARN; }
@@ -333,6 +351,10 @@ export class Hud {
         if (isWide(view) && jump.t > GAUGE_SHOW) { const g = gaugeRect(view); y = g.y + g.gh + 36; }
         if (jump.t < 1.3) ({ text, color } = takeoffLabel(jump));
         else if (!jump.landPrep && timeToGround(jump) < 0.55) { text = 'ALASTULO!'; color = GOOD; size = 22; }
+        else if (jump.danger > 0.2) {
+          text = jump.aoa > FLIGHT.aoaOpt + jump.bandCenter ? '▼ KAATUMISVAARA!' : '▲ KAATUMISVAARA!';
+          color = BAD; size = 22;
+        }
         else if (!jump.landPrep) {
           const err = jump.aoa - FLIGHT.aoaOpt - jump.bandCenter;
           if (err > jump.bandHalf + 1 * DEG) { text = '▼ nojaa eteen'; color = WARN; }
@@ -340,12 +362,19 @@ export class Hud {
         }
         break;
       case Phase.SLIDE:
+      case Phase.CRASH:
       case Phase.DONE:
-        if (jump.touchdown && !view.resultOpen) {
+        if (view.resultOpen) break;
+        if (jump.touchdown) {
           text = `${fmt(jump.touchdown.distance)} m`;
           size = 44; y = H * 0.24;
           sub = { telemark: 'Telemark!', twofoot: 'Tasajalka-alastulo', fall: 'Kaatui!' }[jump.outcome];
           color = jump.outcome === 'fall' ? BAD : '#ffffff';
+        } else if (jump.crash) {
+          // Vauhtimäessä kaatunut tai ilmassa hallintansa menettänyt, joka ei ole vielä pudonnut rinteeseen
+          text = 'KAATUI!';
+          size = 44; y = H * 0.24; color = BAD;
+          if (jump.crash === 'inrun') sub = 'Vauhtimäessä – ei tulosta';
         }
         break;
     }

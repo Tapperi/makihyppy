@@ -1,17 +1,19 @@
 // Yhden hypyn tilakone: lähtöpuomi -> vauhtimäki -> lento -> liuku -> valmis.
+// Vauhtimäestä ja lennosta voi myös päätyä kaatumiseen (CRASH), jos asento pettää.
 // Ei riipu DOMista eikä piirrosta: ohjaus annetaan step()-kutsulle, joten samaa
 // luokkaa voi ajaa ihmispelaaja, testibotti tai (vaiheessa 2) tietokonevastustaja.
 
-import { G, INRUN, TAKEOFF, FLIGHT, LANDING, GATE_TIME, WIND, BAND } from './config.js';
+import { G, INRUN, TAKEOFF, FLIGHT, LANDING, GATE_TIME, WIND, BAND, CRASH } from './config.js';
 import { clamp, lerp, randn } from './util.js';
 import { inrunAccel, takeoffQuality, lateTakeoffQuality, flightAccel, slideAccel } from './physics.js';
-import { scoreJump, Outcome } from './scoring.js';
+import { scoreJump, scoreInrunCrash, Outcome } from './scoring.js';
 
 export const Phase = {
   READY: 'ready',     // puomilla, odottaa lähtöä
   INRUN: 'inrun',
   FLIGHT: 'flight',
   SLIDE: 'slide',     // alastulon jälkeinen liuku
+  CRASH: 'crash',     // hallinta meni vauhtimäessä tai ilmassa: hyppääjä pomppii ja kierii alas
   DONE: 'done',
 };
 
@@ -66,7 +68,13 @@ export class Jump {
     this.fallS = 0;             // kaatumiskohta rinnettä pitkin
     this.snow = 0;              // 0..1: kaatuneen hyppääjän keräämä lumi
     this.ballRadius = 0;        // lumipallon säde (m)
-    this.roll = 0;              // pyörimiskulma (rad)
+    this.roll = 0;              // pyörimiskulma (rad, ruudulla myötäpäivään = eteenpäin)
+    this.danger = 0;            // 0..1: kaatumisvaara, kasvaa kun mittari on syvällä punaisella
+    this.crash = null;          // 'inrun' | 'flight', kun hallinta on mennyt
+    this.airborne = false;      // kaatunut hyppääjä on ilmassa (pomppujen välissä)
+    this.spin = 0;              // pyörimisnopeus kaatuessa (rad/s)
+    this.crashHits = 0;         // iskujen määrä (piirto seuraa tätä tehosteita varten)
+    this.crashImpact = 0;       // viimeisimmän iskun voimakkuus (m/s)
   }
 
   /**
@@ -81,6 +89,7 @@ export class Jump {
       case Phase.INRUN: this.stepInrun(dt, input); break;
       case Phase.FLIGHT: this.stepFlight(dt, input); break;
       case Phase.SLIDE: this.stepSlide(dt); break;
+      case Phase.CRASH: this.stepCrash(dt); break;
     }
   }
 
@@ -103,6 +112,11 @@ export class Jump {
     const hill = this.hill;
     const angle = hill.inrunPos(this.d).angle;
     this.updateBalance(dt, input);
+    // Ponnistuksen jälkeen kyykky on jo purettu: silloin ei enää kaaduta
+    if (!this.takeoff.pressed && this.updateDanger(dt, this.balanceError, CRASH.inrunError, CRASH.inrunTime)) {
+      this.startCrash('inrun');
+      return;
+    }
     this.speed = Math.max(0, this.speed + inrunAccel(this.speed, angle, this.wind.value, this.balanceError) * dt);
     this.d -= this.speed * dt;
 
@@ -143,6 +157,12 @@ export class Jump {
     this.balanceError = clamp((Math.abs(this.balance) - INRUN.balanceHalf) / INRUN.balanceErrFull, 0, 1);
   }
 
+  /** Kasvattaa tai purkaa kaatumisvaaraa. Palauttaa true, kun hallinta menee. */
+  updateDanger(dt, error, limit, time) {
+    this.danger = clamp(this.danger + (error >= limit ? dt / time : -dt / CRASH.recover), 0, 1);
+    return this.danger >= 1;
+  }
+
   launch() {
     const a = this.hill.def.tableAngle;
     const over = -this.d; // nokan yli tällä askeleella kuljettu matka
@@ -154,6 +174,7 @@ export class Jump {
     this.pitch = -a;
     this.omega = 0;
     this.d = 0;
+    this.danger = 0;
     this.setPhase(Phase.FLIGHT);
     // Perusponnistus tulee aina; ajoituksen osuus lisätään painalluksesta
     this.applyImpulse(TAKEOFF.baseShare);
@@ -244,7 +265,14 @@ export class Jump {
 
     const ground = hill.groundY(this.x);
     this.height = this.y - ground;
-    if (this.height <= 0) this.land(ground);
+    if (this.height <= 0) {
+      this.land(ground);
+      return;
+    }
+    // Liian kauan liian kaukana kaistasta: hyppääjä menettää hallinnan ilmassa
+    const risky = !this.landPrep && this.t > FLIGHT.entryTime + 0.3;
+    const limit = this.bandHalf + (this.aoa < aoaOpt ? CRASH.flightFront : CRASH.flightBack);
+    if (this.updateDanger(dt, risky ? off : 0, limit, CRASH.flightTime)) this.startCrash('flight');
   }
 
   land(ground) {
@@ -269,6 +297,7 @@ export class Jump {
     this.pitch = -slope;
     this.posture = 0;
     this.bandError = 0;
+    this.danger = 0;
     this.outcome = outcome;
     this.touchdown = { x: this.x, y: this.y, distance, impact };
     this.result = scoreJump(hill, {
@@ -311,6 +340,143 @@ export class Jump {
     if (this.speed < 0.3 && this.t > 1 || this.s >= hill.landingLength - 2.01) {
       this.speed = 0;
       this.setPhase(Phase.DONE);
+    }
+  }
+
+  // --- Kaatuminen kesken suorituksen ---
+  startCrash(kind) {
+    const rng = this.rng;
+    this.crash = kind;
+    this.outcome = Outcome.FALL;
+    this.pose = 'ragdoll';
+    this.roll = -this.pitch;
+    this.bandError = 0;
+    this.balanceError = 0;
+    this.posture = 0;
+    this.danger = 0;
+    this.airborne = true;
+    if (kind === 'inrun') {
+      // Kimpoaa ladusta ja jatkaa rataa alas. Paino edessä -> naamalleen, takana -> selälleen.
+      const a = this.hill.inrunPos(this.d).angle;
+      const v = this.speed * CRASH.inrunKeep;
+      const pop = CRASH.inrunPop * (0.7 + 0.6 * rng());
+      this.vx = Math.cos(a) * v + Math.sin(a) * pop;
+      this.vy = -Math.sin(a) * v + Math.cos(a) * pop;
+      this.spin = (this.balance < 0 ? 1 : -1) * (4 + 4 * rng());
+      this.takeoffSpeed = this.speed;
+      this.result = scoreInrunCrash();
+      this.result.takeoffQuality = 0;
+      this.result.takeoffSpeed = this.speed;
+      this.hit(CRASH.inrunImpact);
+    } else {
+      // Kärjet liian alhaalla -> kiepsahtaa eteen, liian ylhäällä -> ilma kaataa selälleen
+      this.spin = (this.aoa < FLIGHT.aoaOpt + this.bandCenter ? 1 : -1) * (5 + 4 * rng());
+    }
+    this.setPhase(Phase.CRASH);
+  }
+
+  hit(impact) {
+    this.crashHits++;
+    this.crashImpact = impact;
+  }
+
+  stepCrash(dt) {
+    const hill = this.hill, C = CRASH, rng = this.rng;
+    if (this.airborne) {
+      const v = Math.hypot(this.vx, this.vy);
+      this.vx -= C.airDrag * v * this.vx * dt;
+      this.vy -= (G + C.airDrag * v * this.vy) * dt;
+      this.x += this.vx * dt;
+      this.y += this.vy * dt;
+      this.roll += this.spin * dt;
+      this.speed = Math.hypot(this.vx, this.vy);
+      const surf = hill.surfaceAt(this.x);
+      if (this.y <= surf.y) this.crashLand(surf);
+    } else {
+      const a = hill.surfaceAt(this.x).angle;
+      const braking = this.x > 0 && hill.distAtX(this.x) > hill.brakeStart;
+      const mu = braking ? C.brakeFriction : C.friction;
+      const s = Math.max(0, this.speed + (G * (Math.sin(a) - mu * Math.cos(a)) - C.groundDrag * this.speed * this.speed) * dt);
+      const nx = this.x + Math.cos(a) * s * dt;
+      this.speed = s;
+      if (this.x < 0 && nx >= 0) {
+        // Kierii nokan yli tyhjän päälle
+        this.airborne = true;
+        this.vx = Math.cos(a) * s;
+        this.vy = -Math.sin(a) * s;
+        this.x = nx;
+        this.y -= Math.sin(a) * s * dt;
+      } else {
+        this.x = Math.min(nx, hill.endX - 2);
+        const surf = hill.surfaceAt(this.x);
+        const sin = Math.sin(surf.angle), cos = Math.cos(surf.angle);
+        this.y = surf.y;
+        this.vx = cos * s;
+        this.vy = -sin * s;
+        if (s > C.restSpeed) {
+          this.spin += (s / C.spinRadius * 0.7 - this.spin) * (1 - Math.exp(-dt * 5));
+        } else {
+          // Vauhti loppuu: jää makaamaan rinteen suuntaisesti
+          this.spin *= Math.exp(-dt * 6);
+          const rest = surf.angle + Math.round((this.roll - surf.angle) / Math.PI) * Math.PI;
+          this.roll += (rest - this.roll) * (1 - Math.exp(-dt * 5));
+        }
+        this.roll += this.spin * dt;
+        if (s > C.popSpeed && rng() < C.popRate * dt) {
+          // Raaja tarttuu hankeen ja sinkoaa hyppääjän taas ilmaan
+          const up = s * (C.popMin + (C.popMax - C.popMin) * rng());
+          this.vx = cos * s * C.popKeep + sin * up;
+          this.vy = -sin * s * C.popKeep + cos * up;
+          this.spin = s / C.spinRadius * (0.6 + 0.8 * rng());
+          this.airborne = true;
+          this.hit(up + 2);
+        }
+      }
+    }
+    const surf = hill.surfaceAt(this.x);
+    this.height = Math.max(0, this.y - surf.y);
+    this.pitch = -surf.angle;
+    if (!this.airborne && (this.speed < 0.3 && this.t > 1 || this.x >= hill.endX - 2.01)) {
+      this.speed = 0;
+      this.setPhase(Phase.DONE);
+    }
+  }
+
+  /** Kaatunut hyppääjä iskeytyy pintaan: pomppaa, menettää vauhtia ja alkaa kieriä. */
+  crashLand(surf) {
+    const C = CRASH, rng = this.rng;
+    const sin = Math.sin(surf.angle), cos = Math.cos(surf.angle);
+    const vn = this.vx * sin + this.vy * cos; // pintaa vastaan kohtisuoraan (+ = irti pinnasta)
+    const impact = Math.max(0, -vn);
+    this.y = surf.y;
+    if (this.crash === 'flight' && !this.touchdown) {
+      // Pituus mitataan siitä, mihin hyppääjä putoaa
+      this.s = this.hill.distAtX(this.x);
+      const distance = Math.round(this.s * 2) / 2;
+      this.touchdown = { x: this.x, y: this.y, distance, impact };
+      this.result = scoreJump(this.hill, {
+        distance,
+        outcome: Outcome.FALL,
+        prepTime: 0,
+        impact,
+        avgAoaError: this.aoaErrTime > 0 ? this.aoaErrSum / this.aoaErrTime : 0,
+        crash: true,
+      });
+      this.result.takeoffQuality = this.takeoff.quality;
+      this.result.takeoffSpeed = this.takeoffSpeed;
+    }
+    this.hit(impact);
+    const vt = Math.max(0, this.vx * cos - this.vy * sin) * C.hitKeep;
+    const bounce = impact * C.restitution + vt * C.kick * rng();
+    this.spin = vt / C.spinRadius * (0.5 + 0.7 * rng());
+    if (bounce < C.settle) {
+      this.airborne = false;
+      this.speed = vt;
+      this.vx = cos * vt;
+      this.vy = -sin * vt;
+    } else {
+      this.vx = cos * vt + sin * bounce;
+      this.vy = -sin * vt + cos * bounce;
     }
   }
 }

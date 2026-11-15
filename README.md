@@ -21,6 +21,10 @@ millä tahansa staattisella palvelulla (esim. GitHub Pages).
 | Lähtö, ponnistus, alastulo | iso painike tai napautus ruutuun | välilyönti / Enter |
 | Nojaa eteen / taakse vauhtimäessä (kyykky) ja liidossa | ▼ / ▲ | ↓ / ↑ (myös → / ←, S / W) |
 
+Kaatuminen: jos kyykky- tai asentomittarin osoitin on liian kauan mittarin päiden kirkkaanpunaisella
+kaatumisalueella, hyppääjä menettää hallinnan ja kierii alas. Vauhtimäessä kaatunut ei saa tulosta;
+ilmassa kaatuneen pituus mitataan putoamiskohdasta. Rajat ja kierimisen fysiikka: `js/config.js`:n `CRASH`.
+
 ## Rakenne
 
 ```

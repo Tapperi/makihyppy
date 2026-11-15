@@ -15,7 +15,10 @@ const POSES = {
   outrun:   { shin: 82, thigh: 96, torso: 86, arm: 62, split: 0 },
   fall:     { shin: 150, thigh: 175, torso: 8, arm: 40, split: 0.3 },
 };
+// Kaatunut hyppääjä makaa rinteessä pää ylämäkeen
+const SPRAWL = { shin: 170, thigh: 178, torso: 172, arm: 160, split: 0.35 };
 const KEYS = ['shin', 'thigh', 'torso', 'arm', 'split'];
+const lerp = (a, b, t) => a + (b - a) * t;
 const NO_WOBBLE = { roll: 0, skiA: 0, skiB: 0, torso: 0, arm: 0 };
 
 const LEN = { shin: 0.46, thigh: 0.46, torso: 0.62, arm: 0.6, neck: 0.2 };
@@ -34,14 +37,54 @@ export class JumperSprite {
   constructor() {
     this.cur = { ...POSES.gate };
     this.fallTilt = 0;
+    this.skis = true;      // false, kun sukset ovat irronneet kaatuessa
+    this.limp = false;     // holtiton ragdoll: molemmat kädet piirretään
+    this.flail = 0;        // raajojen heilunnan vaihe
   }
 
   snap(pose) {
     this.cur = { ...POSES[pose] };
     this.fallTilt = 0;
+    this.skis = true;
+    this.limp = false;
+    this.flail = 0;
   }
 
-  update(dt, pose) {
+  /** Isku heittää raajat äkisti uuteen asentoon. */
+  jolt() {
+    this.flail += 1.5 + Math.random() * 3;
+  }
+
+  /** Lantion paikka suksen koordinaatistossa (m): ragdoll pyörii tämän ympäri. */
+  hip() {
+    const c = this.cur;
+    return [
+      c.split + Math.cos(c.shin * DEG) * LEN.shin + Math.cos(c.thigh * DEG) * LEN.thigh,
+      Math.sin(c.shin * DEG) * LEN.shin + Math.sin(c.thigh * DEG) * LEN.thigh,
+    ];
+  }
+
+  /**
+   * @param energy 0..1: kaatuessa kuinka rajusti raajat heiluvat (0 = makaa paikallaan)
+   */
+  update(dt, pose, energy = 0) {
+    this.limp = pose === 'ragdoll';
+    if (this.limp) {
+      // Raajat viuhtovat eri tahtiin vauhdin mukana; vauhdin loputtua hyppääjä jää makaamaan
+      this.flail += dt * (6 + 16 * energy);
+      const p = this.flail;
+      const wild = {
+        shin: 100 + 75 * Math.sin(p),
+        thigh: 110 + 80 * Math.sin(p * 1.37 + 1),
+        torso: 60 + 70 * Math.sin(p * 0.83 + 2),
+        arm: 150 + 170 * Math.sin(p * 1.71 + 0.5),
+        split: 0.28 + 0.22 * Math.sin(p * 1.2 + 3),
+      };
+      const k = 1 - Math.exp(-dt * 28);
+      for (const key of KEYS) this.cur[key] += (lerp(SPRAWL[key], wild[key], energy) - this.cur[key]) * k;
+      this.fallTilt = 0;
+      return;
+    }
     const target = POSES[pose] ?? POSES.flight;
     const rate = pose === 'extend' ? 30 : pose === 'fall' ? 9 : 14;
     const k = 1 - Math.exp(-dt * rate);
@@ -82,6 +125,7 @@ export class JumperSprite {
       ctx.stroke();
     };
     const ski = (footX, tilt) => {
+      if (!this.skis) return;
       ctx.save();
       ctx.translate(footX, 0.03);
       ctx.rotate(tilt);
@@ -120,6 +164,14 @@ export class JumperSprite {
       line(hip, backKnee, 0.17, COLORS.suitDark);
       line(backKnee, backFoot, 0.15, COLORS.suitDark);
       line(backFoot, [backFoot[0] + 0.2, 0.02], 0.13, COLORS.boot);
+    }
+
+    // Holtittomasti pyörivällä hyppääjällä näkyy myös toinen käsi
+    if (this.limp) {
+      const hand2 = add(shoulder, dir(c.arm + 150 + 40 * Math.sin(this.flail * 1.3)), LEN.arm);
+      line(shoulder, hand2, 0.11, COLORS.suitDark);
+      ctx.fillStyle = COLORS.glove;
+      ctx.beginPath(); ctx.arc(hand2[0], hand2[1], 0.07, 0, Math.PI * 2); ctx.fill();
     }
 
     // Etujalka

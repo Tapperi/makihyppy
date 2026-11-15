@@ -15,6 +15,39 @@ const snap = async (name) => { if (shots) await page.screenshot(join(shots, `${n
 const G = 'window.__game';
 const log = (...a) => console.log('  ', ...a);
 
+/** Ajaa vauhtimäkeä kyykky kaistalla (nuolinäppäimillä), kunnes ehto täyttyy tai vauhtimäki loppuu. */
+async function rideInrun(until = 'false') {
+  await page.until(`${G}.jump.phase !== 'ready'`); // lähtöpainallus ehtii perille
+  let held = null;
+  for (;;) {
+    const s = await page.eval(`(() => { const j = ${G}.jump;
+      return { inrun: j.phase === 'inrun', b: j.balance + 0.15 * j.balanceVel, done: !!(${until}) }; })()`);
+    if (s.done || !s.inrun) break;
+    const want = s.b > 0.08 ? 'ArrowDown' : s.b < -0.08 ? 'ArrowUp' : null;
+    if (want !== held) {
+      if (held) await page.key(held, 'up');
+      if (want) await page.key(want, 'down');
+      held = want;
+    }
+    await sleep(4);
+  }
+  if (held) await page.key(held, 'up');
+}
+
+/** Pitää lennossa kohtauskulman kaistalla, kunnes lento loppuu. Ei paina alastuloa. */
+async function steerFlight() {
+  let down = false;
+  for (;;) {
+    const s = await page.eval(`(() => { const j = ${G}.jump;
+      return { flight: j.phase === 'flight', err: (j.aoa - 24 * Math.PI / 180 - j.bandCenter) * 180 / Math.PI }; })()`);
+    if (!s.flight) break;
+    const want = s.err > 1;
+    if (want !== down) { await page.key('ArrowDown', want ? 'down' : 'up'); down = want; }
+    await sleep(8);
+  }
+  if (down) await page.key('ArrowDown', 'up');
+}
+
 try {
   // ---------- Puhelin, pystyasento ----------
   await page.viewport(390, 844, true);
@@ -32,12 +65,13 @@ try {
 
   await page.key('Space');
   await page.until(`${G}.jump.phase === 'inrun'`);
-  await page.until(`${G}.jump.d < 45`);
+  await rideInrun(`${G}.jump.d < 45`);
   await snap('03-vauhtimaki');
-  await page.until(`${G}.jump.d < 1.6`, 20000, 4);
+  await rideInrun(`${G}.jump.d < 1.6`);
   await page.key('Space');
   await page.until(`${G}.jump.phase === 'flight'`);
-  const q = await page.eval(`${G}.jump.takeoff.quality`);
+  assert.equal(await page.eval(`${G}.jump.crash`), null, 'kyykky kaistalla: ei kaatumista');
+  const q =await page.eval(`${G}.jump.takeoff.quality`);
   log(`ponnistus: ${(q * 100).toFixed(0)} % (painettu ${(await page.eval(`${G}.jump.takeoff.at`)).toFixed(2)} m ennen nokkaa)`);
   assert.ok(q > 0.5, 'ponnistus rekisteröityi');
   await snap('04-ponnistus');
@@ -79,6 +113,7 @@ try {
   await page.touch(195, 300); // napautus pelialueelle
   await page.until(`${G}.jump.phase === 'inrun'`);
   await page.until(`document.getElementById('btn-action').textContent === 'PONNISTA'`, 2000);
+  await rideInrun();
   await page.until(`${G}.jump.phase === 'flight'`);
   assert.equal(await page.eval(`${G}.jump.takeoff.pressed`), false);
   await sleep(450);
@@ -90,6 +125,7 @@ try {
   await page.touch(0, 0, 'up');
   assert.equal(lean, 1, 'eteen-painike pohjassa antaa nojauksen');
   assert.ok(await page.eval(`${G}.jump.pitch`) < pitch0, 'sukset kääntyivät alaspäin');
+  await steerFlight(); // asento kaistalla, jottei hallinta mene ilmassa
   await page.until(`${G}.jump.phase !== 'flight'`);
   await sleep(500);
   await snap('10-kaatuminen');
@@ -112,7 +148,7 @@ try {
   await page.eval(`${G}.jump.gateLeft = 0.3`);
   await page.until(`${G}.jump.phase === 'inrun'`);
   log('lähtöajan loppuminen käynnistää hypyn');
-  await page.until(`${G}.jump.d < 1.6`, 20000, 4);
+  await rideInrun(`${G}.jump.d < 1.6`);
   await page.touch(...(await page.center('btn-action')));
   await page.until(`${G}.jump.phase === 'flight' && ${G}.jump.t > 1.2`);
   await page.touch(...(await page.center('btn-action')));
@@ -123,8 +159,70 @@ try {
   assert.notEqual(r3.outcome, 'fall');
 
   // Ennätys tallentui
-  const stored = await page.eval(`JSON.parse(localStorage.getItem('tuulimaki.v1')).best.tuulivaara`);
+  // Kausi 1 on tallennuksen juuritasolla, myöhemmät seasons-kentässä (ks. js/storage.js)
+  const stored = await page.eval(`import('./js/config.js').then(({ SEASON }) => {
+    const d = JSON.parse(localStorage.getItem('tuulimaki.v1'));
+    return (SEASON === 1 ? d : d.seasons[SEASON]).best.tuulivaara; })`);
   assert.equal(stored.distance, Math.max(r1.distance, r3.distance), 'ennätys tallessa');
+
+  // --- Hyppy 4: kyykky pettää siirtymäkaaressa -> kaatuu vauhtimäessä, kierii nokan yli ---
+  /** Kuvasarja kaatumisesta: n kuvaa noin 60 ms välein. */
+  const burst = async (name, n) => { for (let i = 1; i <= n; i++) { await snap(`${name}-${i}`); await sleep(40); } };
+  await sleep(800);
+  await page.touch(...(await page.center('btn-again')));
+  await page.until(`${G}.mode === 'play' && ${G}.jump.phase === 'ready'`);
+  await page.touch(195, 300); // napautus pelialueelle: lähtö
+  await rideInrun(`${G}.jump.d < 42`);
+  await page.key('ArrowUp', 'down'); // nojaa taakse kaaressa: osoitin karkaa kaatumisalueelle
+  await page.until(`${G}.jump.danger > 0.5`);
+  await snap('14-kaatumisvaara');
+  await page.until(`${G}.jump.phase === 'crash'`);
+  await page.key('ArrowUp', 'up');
+  const c4 = await page.eval(`({ crash: ${G}.jump.crash, d: ${G}.jump.d, kmh: ${G}.jump.result.takeoffSpeed * 3.6, total: ${G}.jump.result.total })`);
+  log(`hyppy 4: kaatui vauhtimäessä ${c4.d.toFixed(0)} m ennen nokkaa, ${c4.kmh.toFixed(0)} km/h`);
+  assert.equal(c4.crash, 'inrun');
+  assert.equal(c4.total, 0, 'vauhtimäessä kaatunut ei saa pisteitä');
+  await burst('15-kaatuminen-vauhtimaki', 6);
+  assert.equal(await page.eval(`document.getElementById('btn-action').disabled`), true, 'painike pois käytöstä kaatuessa');
+  await page.until(`${G}.jump.x > 2`);
+  await burst('16-nokan-yli', 8);
+  assert.equal(await page.eval(`${G}.mode`), 'play', 'tulos odottaa kierimisen loppua');
+  await page.until(`${G}.jump.t > 2.1 && ${G}.jump.x > 30`);
+  await burst('17-kierii-rinteessa', 4);
+  await page.touch(195, 300); // painallus ohittaa kierimisen
+  await page.until(`${G}.mode === 'result'`, 3000);
+  assert.equal(await page.eval(`document.getElementById('res-outcome').textContent`), 'Kaatuminen vauhtimäessä');
+  assert.equal(await page.eval(`document.getElementById('res-total').textContent`), '0,0');
+  await snap('18-tulos-kaatuminen-vauhtimaki');
+
+  // --- Hyppy 5: kärjet liian ylhäällä liian kauan -> hallinta menee ilmassa ---
+  await sleep(800);
+  await page.touch(...(await page.center('btn-again')));
+  await page.until(`${G}.mode === 'play' && ${G}.jump.phase === 'ready'`);
+  await page.touch(195, 300);
+  await rideInrun(`${G}.jump.d < 1.6`);
+  await page.touch(195, 300); // ponnistus
+  await page.until(`${G}.jump.phase === 'flight' && ${G}.jump.t > 0.6`);
+  await page.key('ArrowUp', 'down');
+  await page.until(`${G}.jump.danger > 0.5 || ${G}.jump.phase !== 'flight'`);
+  await snap('19-kaatumisvaara-ilmassa');
+  await page.until(`${G}.jump.phase !== 'flight'`);
+  await page.key('ArrowUp', 'up');
+  assert.equal(await page.eval(`${G}.jump.crash`), 'flight', 'hallinta meni ilmassa');
+  await burst('20-kaatuminen-ilmassa', 5);
+  await page.until(`${G}.jump.crashHits > 0`);
+  await burst('21-isku-rinteeseen', 8);
+  await page.until(`${G}.mode === 'result' || ${G}.jump.t > 2.5`);
+  await burst('22-kierii', 3);
+  await page.until(`${G}.jump.phase === 'done'`, 30000);
+  await snap('23-makaa-rinteessa');
+  await page.until(`${G}.mode === 'result'`);
+  const r5 = await page.eval(`${G}.jump.result`);
+  log(`hyppy 5: kaatui ilmassa, ${r5.distance} m, tyyli ${r5.style}, yht ${r5.total} (${r5.deductions.map((d) => d.label).join(', ')})`);
+  assert.equal(r5.crash, 'flight');
+  assert.ok(r5.distance > 0 && r5.distance < r1.distance, 'pituus mitataan putoamiskohdasta');
+  assert.equal(await page.eval(`document.getElementById('res-outcome').textContent`), 'Kaatuminen ilmassa');
+  await snap('24-tulos-kaatuminen-ilmassa');
 
   // ---------- PWA ----------
   const manifest = await page.eval(`fetch('manifest.webmanifest').then(r => r.json())`);
@@ -148,7 +246,7 @@ try {
   await page.key('Space');
   await page.until(`${G}.jump.phase === 'ready'`);
   await page.key('Space');
-  await page.until(`${G}.jump.d < 1.6`, 20000, 4);
+  await rideInrun(`${G}.jump.d < 1.6`);
   await page.key('Space');
   await page.until(`${G}.jump.phase === 'flight' && ${G}.jump.t > 1.5`);
   await snap('13-tyopoyta-liito');

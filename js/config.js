@@ -100,6 +100,42 @@ export const LANDING = {
   slideDrag: 0.0035,
 };
 
+/**
+ * Kaatuminen kesken suorituksen: kun kyykky- tai asentomittarin osoitin on liian syvällä
+ * punaisella (virhe >= raja), vaara kasvaa; täynnä (1) hyppääjä menettää hallinnan.
+ * Sen jälkeen hän on eloton kappale, joka pomppii ja pyörii alas (Jump.stepCrash).
+ */
+export const CRASH = {
+  inrunError: 0.85,    // kyykkymittarin virhe (0..1), josta vaara alkaa kasvaa
+  inrunTime: 0.6,      // näin kauan rajan yli = kaatuu (s)
+  // Lennossa raja on kulma kaistan reunasta. Etureunan alla (sukellus) se on tiukempi kuin
+  // takareunan yllä, jossa mittarissa on ensin keltainen alue.
+  flightFront: 3.5 * DEG,
+  flightBack: 10 * DEG,
+  flightTime: 0.8,
+  recover: 0.6,        // vaara purkautuu tässä ajassa, kun osoitin palaa rajan alle (s)
+  // Vauhtimäessä kaatuminen
+  inrunKeep: 0.92,     // vauhdista säilyvä osuus kaatumishetkellä
+  inrunPop: 2.6,       // hyppääjä kimpoaa ladusta (m/s)
+  inrunImpact: 7,      // ensimmäisen tällin voimakkuus tehosteita varten (m/s)
+  // Kierivä ja pomppiva hyppääjä
+  airDrag: 0.008,      // ilmanvastus holtittomasti pyörivänä (1/m)
+  restitution: 0.35,   // pinnasta kimpoava osuus kohtisuorasta nopeudesta
+  kick: 0.1,           // osa pinnan suuntaisesta vauhdista kääntyy pompuksi (enintään, osuus)
+  hitKeep: 0.86,       // pinnan suuntaisesta vauhdista säilyvä osuus iskussa
+  settle: 1.5,         // tätä pienempi pomppu jää liu'uksi (m/s)
+  friction: 0.45,      // kierimisen kitka rinteessä
+  brakeFriction: 0.7,  // ja tasaisella loppuliu'ulla
+  groundDrag: 0.006,   // (1/m)
+  popSpeed: 7,         // tätä kovemmassa vauhdissa kierivä hyppääjä sinkoaa välillä ilmaan
+  popRate: 1.4,        // keskimäärin näin monta kertaa sekunnissa
+  popMin: 0.08, popMax: 0.22, // singahduksen nopeus osuutena vauhdista
+  popKeep: 0.9,
+  spinRadius: 1.6,     // pyörimisnopeus = vauhti / tämä (m)
+  restSpeed: 3,        // tätä hitaammin hyppääjä jää makaamaan rinteen suuntaisesti (m/s)
+  flightPenalty: 4,    // tyylivähennys ilmassa menetetystä hallinnasta kaatumisen lisäksi
+};
+
 export const WIND = {
   max: 4,              // m/s, + = vastatuuli
   baseRange: 1.4,

@@ -10,8 +10,9 @@ export const fixedWind = (value) => ({ value, history: [], update() {}, reset() 
 
 /**
  * @param opts.takeoffAt  ponnistuskohta metreinä ennen nokkaa (null = ei ponnistusta)
- * @param opts.balance    true = pitää kyykkyasennon kaistalla vauhtimäessä
- * @param opts.steer      true = pitää kohtauskulman optimissa
+ * @param opts.balance    true = pitää kyykkyasennon kaistalla vauhtimäessä; luku = pitää osoittimen
+ *                        tässä kohdassa (esim. 0.5 = punaisella mutta ei kaatumisalueella)
+ * @param opts.steer      true = pitää kohtauskulman optimissa; luku = nojaa lennossa koko ajan näin (-1..1)
  * @param opts.landLead   alastulonapin painallus näin monta sekuntia ennen maata (null = ei paineta)
  */
 export function runJump(hill, wind, opts = {}, seed = 1) {
@@ -23,12 +24,16 @@ export function runJump(hill, wind, opts = {}, seed = 1) {
     const input = { action: false, lean: 0 };
     if (jump.phase === Phase.READY && !started) { input.action = true; started = true; }
     else if (jump.phase === Phase.INRUN) {
-      if (balance) input.lean = Math.max(-1, Math.min(1, (jump.balance + 0.15 * jump.balanceVel) / 0.05));
+      if (balance !== false) {
+        const target = balance === true ? 0 : balance;
+        input.lean = Math.max(-1, Math.min(1, (jump.balance - target + 0.15 * jump.balanceVel) / 0.05));
+      }
       if (takeoffAt !== null && !jump.takeoff.pressed && jump.d - jump.speed * STEP * 0.5 <= takeoffAt) input.action = true;
     } else if (jump.phase === Phase.FLIGHT) {
       flightTime = jump.t;
       maxHeight = Math.max(maxHeight, jump.height);
-      if (steer) input.lean = Math.max(-1, Math.min(1, (jump.aoa - FLIGHT.aoaOpt - jump.bandCenter) / (4 * DEG)));
+      if (typeof steer === 'number') input.lean = jump.t > FLIGHT.entryTime ? steer : 0;
+      else if (steer) input.lean = Math.max(-1, Math.min(1, (jump.aoa - FLIGHT.aoaOpt - jump.bandCenter) / (4 * DEG)));
       if (landLead !== null && !landed && jump.t > FLIGHT.landArmTime) {
         // arvio ajasta maahan: korkeus / lähestymisnopeus rinnettä kohti
         const slope = hill.slopeAtX(jump.x);

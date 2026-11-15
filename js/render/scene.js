@@ -13,8 +13,11 @@ const CAM_OFFSET = {
   [Phase.INRUN]: [4, -1.5],
   [Phase.FLIGHT]: [5, -2.5],
   [Phase.SLIDE]: [2, 0.5],
+  [Phase.CRASH]: [3, 0.8],
   [Phase.DONE]: [0, 1],
 };
+
+const SKI_LENGTH = 2.45;    // irronneen suksen pituus (m)
 
 export class Scene {
   constructor(canvas, hill) {
@@ -32,6 +35,16 @@ export class Scene {
     this.shx = 0; this.shy = 0; // kameran tärinä (px)
     this.streaks = [];     // ilmavirtaviivat hyppääjän ympärillä
     this.streakDebt = 0;
+    // Kaatumisen tehosteet
+    this.debris = [];      // irronneet sukset
+    this.bursts = [];      // iskutähdet
+    this.shake = 0;        // iskun aiheuttama kameran tärinä (px), vaimenee
+    this.flash = 0;        // 0..1: iskun välähdys
+    this.hitStop = 0;      // kovan iskun jälkeen peli pysähtyy hetkeksi (s) – main.js lukee tämän
+    this.lastHits = 0;
+    this.camH = 0;         // kaatuessa kamera seuraa pomppuja vain osittain
+    this.zoom = 1;         // kaatuessa kamera zoomaa lähemmäs
+    this.punch = 0;        // iskun aiheuttama lisäzoomin nytkähdys, vaimenee
     this.buildStatic();
   }
 
@@ -76,7 +89,8 @@ export class Scene {
     this.W = w; this.H = h; this.dpr = dpr;
     this.canvas.width = Math.round(w * dpr);
     this.canvas.height = Math.round(h * dpr);
-    this.scale = Math.min(w, h) / VIEW_METERS;
+    this.baseScale = Math.min(w, h) / VIEW_METERS;
+    this.scale = this.baseScale * (this.zoom + this.punch);
     const ctx = this.ctx;
     this.sky = ctx.createLinearGradient(0, 0, 0, h);
     this.sky.addColorStop(0, '#4f93d1');
@@ -99,6 +113,12 @@ export class Scene {
     this.particles.length = 0;
     this.streaks.length = 0;
     this.wobble = 0; this.shx = 0; this.shy = 0;
+    this.debris.length = 0;
+    this.bursts.length = 0;
+    this.shake = 0; this.flash = 0; this.hitStop = 0; this.camH = 0;
+    this.zoom = 1; this.punch = 0;
+    this.scale = this.baseScale ?? this.scale;
+    this.lastHits = jump.crashHits;
     this.lastPhase = jump.phase;
   }
 
@@ -112,16 +132,24 @@ export class Scene {
     const k = 1 - Math.exp(-dt * 3);
     cam.ox += (tx - cam.ox) * k;
     cam.oy += (ty - cam.oy) * k;
-    const nx = jump.x + cam.ox, ny = jump.y + cam.oy;
+    // Kaatuessa kamera pysyy lähempänä rinnettä, jotta pomput näkyvät pomppuina
+    const crashed = jump.phase === Phase.CRASH;
+    this.camH += ((jump.crash ? jump.height : 0) - this.camH) * (1 - Math.exp(-dt * 6));
+    const nx = jump.x + cam.ox, ny = jump.y + cam.oy - this.camH * 0.6;
     if (dt > 0) { cam.vx = (nx - cam.x) / dt; cam.vy = (ny - cam.y) / dt; }
     cam.x = nx; cam.y = ny;
 
-    this.sprite.update(dt, jump.pose);
+    const energy = crashed ? clamp(Math.max(Math.abs(jump.spin) / 6, jump.speed / 14), 0, 1) : 0;
+    this.sprite.update(dt, jump.pose, energy);
     this.updateWobble(jump, wind, dt);
     this.updateStreaks(jump, wind, dt);
+    this.updateCrashFx(jump, dt);
 
     // Lumipöllähdys alastulossa ja jarrutuksessa
-    if (jump.phase === Phase.SLIDE && this.lastPhase === Phase.FLIGHT) {
+    if (crashed) {
+      // Kierivä hyppääjä auraa lunta koko matkan
+      if (!jump.airborne && jump.speed > 2 && Math.random() < dt * 140) this.spray(jump, 2, 0.7);
+    } else if (jump.phase === Phase.SLIDE && this.lastPhase === Phase.FLIGHT) {
       this.spray(jump, jump.outcome === 'fall' ? 46 : 22, 1);
     } else if (jump.phase === Phase.SLIDE && jump.speed > 3 && (jump.outcome === 'fall' || jump.s > this.hill.brakeStart)) {
       if (Math.random() < dt * 90) this.spray(jump, 1, 0.5);
@@ -147,13 +175,15 @@ export class Scene {
   // --- Huojunta: amplitudi kasvaa asentovirheen mukana, puuska lisää sitä hetkeksi ---
   updateWobble(jump, wind, dt) {
     const gliding = jump.phase === Phase.FLIGHT && !jump.landPrep;
-    const target = gliding
+    const base = gliding
       ? clamp((jump.bandError + 0.45 * (wind.gustLevel || 0)) * jump.posture, 0, 1)
       : jump.phase === Phase.INRUN ? jump.balanceError * 0.4 // huono kyykky näkyy kevyenä huojuntana
       : 0;
+    // Kaatumisvaaran kasvaessa hyppääjä alkaa heilua holtittomasti
+    const target = Math.max(base, jump.danger);
     this.wobble += (target - this.wobble) * (1 - Math.exp(-dt * 9));
-    // Kevyt kameran tärinä vasta isolla virheellä
-    const shake = clamp((this.wobble - 0.55) / 0.45, 0, 1) * 4;
+    // Kevyt kameran tärinä vasta isolla virheellä; vaara ja iskut ravistavat kunnolla
+    const shake = clamp((this.wobble - 0.55) / 0.45, 0, 1) * 4 + jump.danger * 5 + this.shake;
     this.shx = shake * Math.sin(this.time * 83);
     this.shy = shake * Math.cos(this.time * 67);
   }
@@ -222,18 +252,87 @@ export class Scene {
     }
   }
 
+  // --- Kaatumisen tehosteet: iskut, irtoavat sukset, tärinä ja välähdykset ---
+  updateCrashFx(jump, dt) {
+    if (jump.phase === Phase.CRASH && this.lastPhase !== Phase.CRASH) this.shake = Math.max(this.shake, 9);
+    if (jump.crashHits > this.lastHits) this.crashHit(jump);
+    this.lastHits = jump.crashHits;
+
+    this.shake *= Math.exp(-dt * 7);
+    this.flash *= Math.exp(-dt * 9);
+    // Kamera zoomaa kaatujaan ja nytkähtää jokaisesta iskusta
+    const zoomTo = jump.phase === Phase.CRASH ? 1.35 : jump.crash ? 1.2 : 1;
+    this.zoom += (zoomTo - this.zoom) * (1 - Math.exp(-dt * 4));
+    this.punch *= Math.exp(-dt * 10);
+    if (this.baseScale) this.scale = this.baseScale * (this.zoom + this.punch);
+    for (const b of this.bursts) b.age += dt;
+    this.bursts = this.bursts.filter((b) => b.age < b.life);
+
+    // Irronneet sukset lentävät, pyörivät ja kimpoilevat rinteessä
+    const hill = this.hill;
+    for (const d of this.debris) {
+      if (d.rest) continue;
+      d.vy -= 9.81 * dt;
+      d.x += d.vx * dt; d.y += d.vy * dt;
+      d.a += d.va * dt;
+      const surf = hill.surfaceAt(d.x);
+      if (d.y > surf.y) continue;
+      const sin = Math.sin(surf.angle), cos = Math.cos(surf.angle);
+      const vn = d.vx * sin + d.vy * cos, vt = (d.vx * cos - d.vy * sin) * 0.72;
+      const up = Math.max(0, -vn) * 0.45;
+      d.y = surf.y;
+      d.vx = cos * vt + sin * up;
+      d.vy = -sin * vt + cos * up;
+      d.va = (Math.random() - 0.5) * 3 * Math.abs(vt) - d.va * 0.4;
+      if (up > 1.5) this.sprayAt(d.x, d.y, surf.angle, d.vx, d.vy, 4, 0.5);
+      if (up < 0.8 && Math.abs(vt) < 1.5) {
+        // Jää lojumaan rinteeseen
+        d.rest = true;
+        d.a = -surf.angle + Math.round((d.a + surf.angle) / Math.PI) * Math.PI;
+      }
+    }
+  }
+
+  /** Hyppääjä iski pintaan: lumiräjähdys, tärähdys, välähdys ja ensimmäisellä kerralla sukset irti. */
+  crashHit(jump) {
+    const p = clamp(jump.crashImpact / 11, 0.2, 1);
+    this.spray(jump, Math.round(18 + 60 * p), 0.8 + 1.4 * p);
+    this.shake = Math.max(this.shake, 6 + 20 * p);
+    this.flash = Math.max(this.flash, 0.25 + 0.75 * p);
+    this.punch = Math.max(this.punch, 0.04 + 0.12 * p);
+    if (p > 0.45) this.hitStop = Math.max(this.hitStop, 0.03 + 0.07 * p);
+    this.bursts.push({ x: jump.x, y: jump.y + 0.5, age: 0, life: 0.2 + 0.12 * p, p, rot: Math.random() * 6.28 });
+    this.sprite.jolt();
+    if (this.sprite.skis) {
+      this.sprite.skis = false;
+      for (let i = 0; i < 2; i++) {
+        const keep = 0.55 + Math.random() * 0.5;
+        this.debris.push({
+          x: jump.x, y: jump.y + 0.4,
+          vx: jump.vx * keep + (Math.random() - 0.5) * 6,
+          vy: jump.vy * keep + 4 + Math.random() * 7,
+          a: jump.pitch, va: (Math.random() < 0.5 ? -1 : 1) * (7 + Math.random() * 12),
+          rest: false,
+        });
+      }
+    }
+  }
+
   spray(jump, count, power) {
-    const slope = -jump.pitch;
+    this.sprayAt(jump.x, jump.y, -jump.pitch, jump.vx, jump.vy, count, power);
+  }
+
+  sprayAt(x, y, slope, vx0, vy0, count, power) {
     for (let i = 0; i < count; i++) {
       const a = slope + 0.3 + Math.random() * 1.2;
       const v = (2 + Math.random() * 5) * power;
       this.particles.push({
-        x: jump.x + (Math.random() - 0.5) * 1.2,
-        y: jump.y + 0.1,
-        vx: jump.vx * 0.35 + Math.cos(a) * v * (Math.random() < 0.5 ? -0.4 : 1),
-        vy: jump.vy * 0.35 + Math.sin(a) * v,
+        x: x + (Math.random() - 0.5) * 1.2,
+        y: y + 0.1,
+        vx: vx0 * 0.35 + Math.cos(a) * v * (Math.random() < 0.5 ? -0.4 : 1),
+        vy: vy0 * 0.35 + Math.sin(a) * v,
         life: 0.35 + Math.random() * 0.5,
-        r: 0.08 + Math.random() * 0.14,
+        r: (0.08 + Math.random() * 0.14) * Math.max(1, power), // kova isku heittää isompia lumipaakkuja
       });
     }
   }
@@ -251,9 +350,63 @@ export class Scene {
     this.drawInrun(ctx);
     this.drawMarks(ctx, jump);
     this.drawJumper(ctx, jump);
+    this.drawDebris(ctx);
     this.drawStreaks(ctx, jump, wind);
     this.drawParticles(ctx);
+    this.drawBursts(ctx);
     this.drawFlakes(ctx);
+    this.drawImpactOverlay(ctx, jump);
+  }
+
+  drawDebris(ctx) {
+    if (!this.debris.length) return;
+    const sc = this.scale, half = SKI_LENGTH * JUMPER_SCALE / 2;
+    ctx.strokeStyle = COLORS.ski;
+    ctx.lineWidth = 0.07 * JUMPER_SCALE * sc;
+    ctx.lineCap = 'round';
+    for (const d of this.debris) {
+      const dx = Math.cos(d.a) * half, dy = Math.sin(d.a) * half, lift = d.rest ? 0.06 : 0;
+      ctx.beginPath();
+      ctx.moveTo(this.sx(d.x - dx), this.sy(d.y - dy + lift));
+      ctx.lineTo(this.sx(d.x + dx), this.sy(d.y + dy + lift));
+      ctx.stroke();
+    }
+  }
+
+  /** Iskutähti: säteet leviävät iskukohdasta ja haihtuvat. */
+  drawBursts(ctx) {
+    const sc = this.scale;
+    ctx.lineCap = 'round';
+    for (const b of this.bursts) {
+      const u = b.age / b.life, X = this.sx(b.x), Y = this.sy(b.y);
+      const r0 = (0.5 + 2.2 * u) * (0.6 + b.p) * sc, r1 = r0 + (1 - u) * (1.2 + 2.4 * b.p) * sc;
+      ctx.strokeStyle = `rgba(255, 244, 214, ${0.95 * (1 - u)})`;
+      ctx.lineWidth = Math.max(2, sc * 0.22 * (0.5 + b.p) * (1 - u));
+      ctx.beginPath();
+      for (let i = 0; i < 9; i++) {
+        const a = b.rot + i * (Math.PI * 2 / 9) + (i % 2) * 0.2, k = i % 2 ? 0.7 : 1;
+        ctx.moveTo(X + Math.cos(a) * r0, Y + Math.sin(a) * r0);
+        ctx.lineTo(X + Math.cos(a) * r1 * k, Y + Math.sin(a) * r1 * k);
+      }
+      ctx.stroke();
+    }
+  }
+
+  /** Punainen reunahehku kaatumisvaarassa ja iskuissa sekä iskun valkoinen välähdys. */
+  drawImpactOverlay(ctx, jump) {
+    const { W, H } = this;
+    const red = Math.max(jump.danger * (0.5 + 0.2 * Math.sin(this.time * 24)), this.flash * 0.6);
+    if (red > 0.01) {
+      const g = ctx.createRadialGradient(W / 2, H / 2, Math.min(W, H) * 0.28, W / 2, H / 2, Math.max(W, H) * 0.72);
+      g.addColorStop(0, 'rgba(190, 20, 30, 0)');
+      g.addColorStop(1, `rgba(190, 20, 30, ${red})`);
+      ctx.fillStyle = g;
+      ctx.fillRect(0, 0, W, H);
+    }
+    if (this.flash > 0.3) {
+      ctx.fillStyle = `rgba(255, 255, 255, ${(this.flash - 0.3) * 0.7})`;
+      ctx.fillRect(0, 0, W, H);
+    }
   }
 
   // --- Taustavuoret ja metsänreuna (parallaksi) ---
@@ -442,7 +595,7 @@ export class Scene {
   drawJumper(ctx, jump) {
     const sc = this.scale;
     const X = this.sx(jump.x), Y = this.sy(jump.y);
-    if (jump.phase === Phase.FLIGHT && jump.x > 0) {
+    if ((jump.phase === Phase.FLIGHT || (jump.crash && jump.height > 0.2)) && jump.x > 0) {
       // varjo rinteessä
       const gy = this.hill.groundY(jump.x), slope = this.hill.slopeAtX(jump.x);
       const fade = clamp(1 - jump.height / 9, 0.15, 1);
@@ -455,8 +608,23 @@ export class Scene {
       ctx.fill();
       ctx.restore();
     }
+    if (jump.crash) { this.drawRagdoll(ctx, jump, X, Y); return; }
     if (jump.outcome === 'fall' && jump.phase !== Phase.FLIGHT) { this.drawSnowball(ctx, jump, X, Y); return; }
     this.sprite.draw(ctx, X, Y, sc * JUMPER_SCALE, jump.pitch, this.wobbleOffsets());
+  }
+
+  // --- Hallintansa menettänyt hyppääjä: pyörii lantionsa ympäri raajat viuhtoen ---
+  drawRagdoll(ctx, jump, X, Y) {
+    const js = this.scale * JUMPER_SCALE;
+    const slope = -jump.pitch;
+    const moving = jump.phase === Phase.CRASH ? clamp(jump.speed / 8, 0, 1) : 0;
+    const r = (0.22 + 0.3 * moving) * js; // lantion korkeus pinnasta: maatessa matalalla
+    const hip = this.sprite.hip();
+    ctx.save();
+    ctx.translate(X + Math.sin(slope) * r, Y - Math.cos(slope) * r);
+    ctx.rotate(jump.roll);
+    this.sprite.draw(ctx, -hip[0] * js, hip[1] * js, js, 0);
+    ctx.restore();
   }
 
   // --- Kaatunut hyppääjä pyörii alas ja kasvaa lumipalloksi ---
