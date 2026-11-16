@@ -2,7 +2,7 @@
 // Strategia: verkko ensin (uusin versio aina kun yhteys on), välimuisti varalla.
 // Kasvata VERSION-arvoa, kun tiedostolista muuttuu.
 
-const VERSION = 'tuulimaki-v6';
+const VERSION = 'tuulimaki-v7';
 const ASSETS = [
   './',
   'index.html',

@@ -1,8 +1,8 @@
 // K채ynnistys ja pelisilmukka. Kokoaa moduulit yhteen.
 
-import { HILLS, STEP } from './config.js';
+import { HILLS, STEP, SEASON } from './config.js';
 import { createHill } from './hill.js';
-import { Wind } from './wind.js';
+import { Wind, seasonPattern } from './wind.js';
 import { Jump, Phase } from './jump.js';
 import { Input } from './input.js';
 import { Scene } from './render/scene.js';
@@ -24,7 +24,7 @@ const TABLOID_GUARD = 1.2;  // Iltapulun etusivun saa suljettua vasta t채m채n j�
 const canvas = document.getElementById('game');
 const hill = createHill(HILLS.tuulivaara);
 const rng = makeRng((Date.now() ^ (Math.random() * 2 ** 31)) >>> 0);
-const wind = new Wind(rng);
+const wind = new Wind(rng, seasonPattern(SEASON, hill.def.id));
 const jump = new Jump(hill, wind, rng);
 const input = new Input();
 const scene = new Scene(canvas, hill);
@@ -192,6 +192,13 @@ window.addEventListener('orientationchange', resize);
 window.addEventListener('keydown', (e) => {
   if (e.target instanceof HTMLInputElement || e.target instanceof HTMLButtonElement) return;
   if (mode === 'title' && (e.code === 'Space' || e.code === 'Enter') && !e.repeat) { e.preventDefault(); start(); }
+});
+// Esc: hyppy alusta heti, miss채 vaiheessa tahansa (kesken j채채nyt hyppy ei j채채 tuloksiin)
+window.addEventListener('keydown', (e) => {
+  if (e.code !== 'Escape' || e.repeat || mode === 'title') return;
+  if (!ui.board.hidden || !ui.nameDialog.hidden) return;
+  e.preventDefault();
+  newJump();
 });
 
 resize();

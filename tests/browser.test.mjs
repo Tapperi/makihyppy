@@ -251,6 +251,18 @@ try {
   await readTabloid('24-iltapulu-ilmassa');
   await snap('24-tulos-kaatuminen-ilmassa');
 
+  // --- Esc: hyppy alusta heti, tulosruudusta ja kesken hypyn ---
+  await page.key('Escape');
+  assert.equal(await page.eval(`${G}.mode + ' ' + ${G}.jump.phase`), 'play ready', 'Esc tulosruudussa aloittaa uuden hypyn');
+  assert.equal(await page.eval(`document.getElementById('result').hidden`), true);
+  await page.key('Space');
+  await page.until(`${G}.jump.phase === 'inrun' && ${G}.jump.speed > 10`);
+  await page.key('Escape');
+  const esc = await page.eval(`(() => { const j = ${G}.jump; return { mode: ${G}.mode, phase: j.phase, speed: j.speed, gate: j.gateLeft, result: j.result }; })()`);
+  assert.deepEqual([esc.mode, esc.phase, esc.speed, esc.result], ['play', 'ready', 0, null], 'Esc kesken vauhtimäen palauttaa puomille');
+  assert.ok(esc.gate > 19, 'lähtöaika alkaa alusta');
+  log('Esc aloittaa hypyn alusta tulosruudusta ja kesken hypyn');
+
   // ---------- PWA ----------
   const manifest = await page.eval(`fetch('manifest.webmanifest').then(r => r.json())`);
   assert.equal(manifest.display, 'standalone');

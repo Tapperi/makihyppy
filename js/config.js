@@ -141,18 +141,36 @@ export const CRASH = {
   flightPenalty: 4,    // tyylivähennys ilmassa menetetystä hallinnasta kaatumisen lisäksi
 };
 
+/**
+ * Tuuli. Kaudella on yksi tuulikuvio, joka on kaikille sama: silmukka, joka lasketaan kauden
+ * numerosta ja mäestä (js/wind.js). Hyppy alkaa satunnaisesta kohdasta silmukkaa, ja koska
+ * silmukka on lähtöaikaa (GATE_TIME) lyhyempi, jokainen ehtii puomilta mihin tahansa kohtaan.
+ * Hyppykohtaista arpaa on vain vähän: kohina ja puuskien pieni heilunta.
+ */
 export const WIND = {
   max: 4,              // m/s, + = vastatuuli
-  baseRange: 1.4,
-  slowAmp: 1.1, slowPeriod: 9.5,
-  fastAmp: 0.6, fastPeriod: 3.7,
-  gustSigma: 0.55, gustRate: 0.8,   // sileä kohina
-  // Erilliset puuskat
-  burstEvery: 3.5,     // keskimääräinen väli (s)
-  burstMinGap: 1.2,    // lyhin tauko puuskien välillä (s)
+  loop: 19,            // kuvion pituus (s) – pidä pienempänä kuin GATE_TIME
+  // Kaudella tuulee koko ajan samasta suunnasta: voimakkuus elää ja välillä tyyntyy,
+  // mutta vasta- ja myötätuuli eivät vaihdu kesken kauden.
+  strengthMin: 0.8, strengthMax: 2.2, // kauden keskituuli (m/s), arvotaan tältä väliltä
+  headChance: 0.6,     // todennäköisyys, että kauden tuuli on vastatuuli
+  slowAmp: 0.5, slowCycles: 2,   // aallon korkeus osuutena keskituulesta; aaltoja per silmukka
+  fastAmp: 0.25, fastCycles: 5,  //   (kokonaisluku, jotta silmukka on saumaton)
+  // Kauden puuskat: yksi per silmukan lohko, paikka, kesto ja voimakkuus kuuluvat kuvioon.
+  // Puuska joko voimistaa tuulta tai tyynnyttää sen (enintään tyyneksi asti).
+  burstCount: 4,
+  burstMinGap: 0.8,    // lyhin tauko puuskien välillä (s)
   burstMin: 0.5, burstMax: 1.5,       // kesto (s)
-  burstAmpMin: 0.9, burstAmpMax: 2.2, // voimakkuus (m/s), suunta arvotaan
+  burstAmpMin: 0.9, burstAmpMax: 2.2, // voimakkuus (m/s)
   burstLead: 0.4,      // ennakkovaroitus ennen kuin puuska alkaa vaikuttaa (s)
+  // Käsin valitut kaudet: {dir: 1 vasta / -1 myötä, strength}. Muut arvotaan kauden siemenestä.
+  seasons: {
+    3: { dir: 1, strength: 1.8 },   // kohtalainen vastatuuli
+  },
+  // Hyppykohtainen vaihtelu
+  gustSigma: 0.2, gustRate: 0.8,   // sileä kohina (hajonta ~ sigma / sqrt(2 × rate) = 0,16 m/s)
+  burstAmpJitter: 0.1,   // puuskan voimakkuus heiluu ± tämän osuuden
+  burstTimeJitter: 0.1,  // puuskan ajoitus heiluu ± näin monta sekuntia
 };
 
 /**

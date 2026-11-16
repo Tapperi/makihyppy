@@ -20,6 +20,15 @@ millä tahansa staattisella palvelulla (esim. GitHub Pages).
 |---|---|---|
 | Lähtö, ponnistus, alastulo | iso painike tai napautus ruutuun | välilyönti / Enter |
 | Nojaa eteen / taakse vauhtimäessä (kyykky) ja liidossa | ▼ / ▲ | ↓ / ↑ (myös → / ←, S / W) |
+| Hyppy alusta heti (kesken jäänyt hyppy ei jää tuloksiin) | – | Esc |
+
+Tuuli: jokaisella kaudella on yksi tuulikuvio, joka on kaikille sama – `WIND.loop` sekunnin silmukka
+(keskituuli, aallot ja muutama puuska), joka lasketaan kauden numerosta ja mäestä (`js/wind.js`). Kaudella
+tuulee koko ajan samasta suunnasta: tuuli voimistuu ja välillä tyyntyy, mutta vasta- ja myötätuuli eivät vaihdu.
+Suunnan ja voimakkuuden voi valita kaudelle käsin `WIND.seasons`-taulussa, muuten ne arvotaan. Hyppy alkaa
+satunnaisesta kohdasta silmukkaa, ja koska silmukka on lähtöaikaa lyhyempi, jokainen ehtii puomilta samaan
+parhaaseen hetkeen. Hyppyjen välillä vaihtelee vain pieni kohina ja puuskien heilunta (`WIND`-lohkon loppu).
+`node tests/tune.mjs [kausi]` tulostaa kauden kuvion ja botin pituudet eri lähtöhetkillä.
 
 Katse hyppääjässä: kyykky- ja asentomittarin tieto näkyy myös hyppääjässä itsessään (`js/guidance.js`).
 Asento näyttää suunnan – vartalo nousee tai irtoaa suksista, kun pitää nojata eteen, ja painuu kärkien

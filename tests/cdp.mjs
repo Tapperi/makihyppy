@@ -95,7 +95,7 @@ export async function launch({ port = 8123, debugPort = 9333 } = {}) {
     },
     async key(code, type = 'tap') {
       const key = code === 'Space' ? ' ' : code;
-      const vk = { Space: 32, ArrowUp: 38, ArrowDown: 40, Enter: 13 }[code];
+      const vk = { Space: 32, ArrowUp: 38, ArrowDown: 40, Enter: 13, Escape: 27 }[code];
       const base = { code, key, windowsVirtualKeyCode: vk, nativeVirtualKeyCode: vk };
       if (type !== 'up') await send('Input.dispatchKeyEvent', { type: 'rawKeyDown', ...base });
       if (type !== 'down') await send('Input.dispatchKeyEvent', { type: 'keyUp', ...base });

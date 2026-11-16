@@ -2,17 +2,19 @@
 //   node tests/sim.test.mjs
 
 import assert from 'node:assert/strict';
-import { HILLS, WIND, STEP, BAND, DEG, INRUN, FLIGHT, CRASH } from '../js/config.js';
+import { HILLS, WIND, STEP, BAND, DEG, INRUN, FLIGHT, CRASH, SEASON, GATE_TIME } from '../js/config.js';
 import { Phase } from '../js/jump.js';
 import { guidance } from '../js/guidance.js';
 import { createHill } from '../js/hill.js';
-import { Wind } from '../js/wind.js';
+import { Wind, seasonSeed, seasonPattern, makePattern, patternAt } from '../js/wind.js';
 import { distancePoints, scoreJump } from '../js/scoring.js';
 import { posturePerf, inrunAccel } from '../js/physics.js';
 import { makeRng } from '../js/util.js';
 import { runJump, fixedWind } from './bot.js';
 
 const hill = createHill(HILLS.tuulivaara);
+const SEED = seasonSeed(SEASON, hill.def.id);
+const PATTERN = seasonPattern(SEASON, hill.def.id); // nykyisen kauden tuulikuvio
 const dist = (wind, opts) => runJump(hill, fixedWind(wind), opts).result.distance;
 let passed = 0;
 const test = (name, fn) => { fn(); passed++; console.log(`  ok  ${name}`); };
@@ -133,33 +135,106 @@ test('pisteytys', () => {
 });
 
 test('sama siemen antaa saman hypyn', () => {
-  const a = runJump(hill, new Wind(makeRng(5)), {}, 9).result;
-  const b = runJump(hill, new Wind(makeRng(5)), {}, 9).result;
+  const a = runJump(hill, new Wind(makeRng(5), PATTERN), {}, 9).result;
+  const b = runJump(hill, new Wind(makeRng(5), PATTERN), {}, 9).result;
   assert.deepEqual(a, b);
   // Myös kaatuminen pomppuineen toistuu samanlaisena
-  const c = runJump(hill, new Wind(makeRng(5)), { balance: false }, 3).jump;
-  const d = runJump(hill, new Wind(makeRng(5)), { balance: false }, 3).jump;
+  const c = runJump(hill, new Wind(makeRng(5), PATTERN), { balance: false }, 3).jump;
+  const d = runJump(hill, new Wind(makeRng(5), PATTERN), { balance: false }, 3).jump;
   assert.deepEqual([c.crash, c.x, c.crashHits, c.roll], [d.crash, d.x, d.crashHits, d.roll]);
 });
 
-test('tuuli vaihtelee mutta pysyy rajoissa', () => {
-  const wind = new Wind(makeRng(3));
-  let min = Infinity, max = -Infinity;
-  for (let n = 0; n < 40; n++) {
-    wind.reset();
-    for (let i = 0; i < 120 * 25; i++) {
+test('tuuli elää ja voi tyyntyä, mutta suunta ei käänny kesken kauden', () => {
+  let head = 0;
+  for (let season = 1; season <= 30; season++) {
+    const pattern = makePattern(seasonSeed(season, 'tuulivaara'));
+    const wind = new Wind(makeRng(season), pattern);
+    let lo = Infinity, hi = -Infinity;
+    for (let i = 0; i < 120 * 40; i++) {
       wind.update(STEP);
-      min = Math.min(min, wind.value); max = Math.max(max, wind.value);
+      lo = Math.min(lo, wind.value * pattern.dir); hi = Math.max(hi, wind.value * pattern.dir);
+    }
+    assert.ok(lo >= 0, `kausi ${season}: suunta ei käänny (${lo})`);
+    assert.ok(hi <= WIND.max && hi - lo > 1.5, `kausi ${season}: tuuli elää (${lo.toFixed(1)}..${hi.toFixed(1)})`);
+    if (pattern.dir > 0) head++;
+  }
+  assert.ok(head > 10 && head < 28, `vastatuulikausia ${head}/30`);
+});
+
+test('nykyinen kausi: kohtalainen vastatuuli, joka välillä tyyntyy mutta ei käänny myötäiseksi', () => {
+  assert.equal(PATTERN.dir, 1);
+  let lo = Infinity, hi = -Infinity, sum = 0, n = 0;
+  for (let seed = 1; seed <= 20; seed++) {
+    const wind = new Wind(makeRng(seed), PATTERN);
+    for (let i = 0; i < 120 * 40; i++) {
+      wind.update(STEP);
+      lo = Math.min(lo, wind.value); hi = Math.max(hi, wind.value); sum += wind.value; n++;
     }
   }
-  assert.ok(min >= -WIND.max && max <= WIND.max);
-  assert.ok(min < -1.5 && max > 1.5, `vaihteluväli ${min.toFixed(1)}..${max.toFixed(1)}`);
+  console.log(`      tuuli ${lo.toFixed(1)}..${hi.toFixed(1)} m/s, keskiarvo ${(sum / n).toFixed(2)} m/s`);
+  assert.ok(lo >= 0, 'ei koskaan myötätuulta');
+  assert.ok(lo < 0.3, `välillä tyyntyy (${lo})`);
+  assert.ok(hi > 2.8 && hi <= WIND.max);
+  assert.ok(sum / n > 1.3 && sum / n < 2.3, `keskiarvo ${sum / n}`);
+});
+
+test('kauden tuulikuvio: sama siemen = sama kuvio, eri kausi = eri kuvio, silmukka on saumaton', () => {
+  assert.ok(WIND.loop < GATE_TIME, 'puomilta ehtii mihin tahansa kohtaan kuviota');
+  const a = makePattern(SEED), b = makePattern(SEED), other = makePattern(seasonSeed(SEASON + 1, 'tuulivaara'));
+  assert.deepEqual(seasonPattern(SEASON, hill.def.id), makePattern(SEED, WIND.seasons[SEASON]));
+  assert.deepEqual(a, b);
+  assert.notDeepEqual(a, other);
+  assert.ok(Math.abs(patternAt(a, 0).wind - patternAt(a, WIND.loop - 1e-6).wind) < 1e-3, 'ei hyppäystä saumassa');
+  assert.equal(patternAt(a, 3).wind, patternAt(a, 3 + WIND.loop).wind);
+  for (const s of a.bursts) assert.ok(s.at >= 0 && s.at + WIND.burstLead + s.dur < WIND.loop, 'puuska mahtuu silmukkaan');
+  for (let i = 1; i < a.bursts.length; i++) {
+    const prev = a.bursts[i - 1];
+    assert.ok(a.bursts[i].at - (prev.at + WIND.burstLead + prev.dur) >= WIND.burstMinGap - 1e-9, 'puuskien välissä on tauko');
+  }
+});
+
+test('kauden tuuli on kaikille sama: hyppyjen ero samassa kohdassa kuviota on pieni', () => {
+  // Kaksi eri hyppyä (eri rng) samasta kohdasta: ero on vain kohinaa ja puuskien heiluntaa
+  const run = (seedA, seedB, patternB = PATTERN) => {
+    const a = new Wind(makeRng(seedA), PATTERN), b = new Wind(makeRng(seedB), patternB);
+    let sum = 0, n = 0, burstDiff = 0;
+    for (let pos = 0; pos < WIND.loop; pos += 3.1) {
+      a.reset(pos); b.reset(pos);
+      for (let i = 0; i < 120 * 30; i++) {
+        a.update(STEP); b.update(STEP);
+        sum += Math.abs(a.value - b.value); n++;
+      }
+      burstDiff = Math.max(burstDiff, ...a.jitter.map((j, k) => Math.abs(j.amp - b.jitter[k].amp) * Math.abs(a.pattern.bursts[k].amp)));
+    }
+    return { mean: sum / n, burstDiff };
+  };
+  const same = run(1, 2), otherSeason = run(1, 2, seasonPattern(SEASON + 1, 'tuulivaara'));
+  console.log(`      keskimääräinen ero: sama kausi ${same.mean.toFixed(2)} m/s, eri kausi ${otherSeason.mean.toFixed(2)} m/s`);
+  assert.ok(same.mean < 0.3, `sama kausi ${same.mean}`);
+  assert.ok(same.burstDiff < 0.5, `puuskan huipun ero ${same.burstDiff}`);
+  assert.ok(otherSeason.mean > 3 * same.mean, 'eri kaudella on selvästi eri tuuli');
+});
+
+test('kauden tuuli: samalla lähtöhetkellä hyvä botti hyppää lähes saman pituuden', () => {
+  let worst = 0;
+  for (const pos of [0, 4, 8, 12, 16]) {
+    const ds = [];
+    for (let seed = 1; seed <= 12; seed++) {
+      const wind = new Wind(makeRng(seed), PATTERN);
+      const reset = wind.reset.bind(wind);
+      wind.reset = () => reset(pos);   // jokainen hyppy alkaa samasta kohdasta kuviota
+      ds.push(runJump(hill, wind, {}, seed).result.distance);
+    }
+    worst = Math.max(worst, Math.max(...ds) - Math.min(...ds));
+  }
+  console.log(`      suurin hajonta samalla lähtöhetkellä ${worst} m`);
+  assert.ok(worst <= 6, `hajonta ${worst} m`);
 });
 
 test('vaihtelevassa tuulessa hyvä botti hyppää uskottavia pituuksia', () => {
   const ds = [];
   for (let seed = 1; seed <= 40; seed++) {
-    const { jump, result } = runJump(hill, new Wind(makeRng(seed)), {}, seed);
+    const { jump, result } = runJump(hill, new Wind(makeRng(seed), PATTERN), {}, seed);
     assert.equal(jump.crash, null, 'hyvä botti ei kaadu');
     ds.push(result.distance);
   }
