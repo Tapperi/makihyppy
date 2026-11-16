@@ -21,6 +21,12 @@ millä tahansa staattisella palvelulla (esim. GitHub Pages).
 | Lähtö, ponnistus, alastulo | iso painike tai napautus ruutuun | välilyönti / Enter |
 | Nojaa eteen / taakse vauhtimäessä (kyykky) ja liidossa | ▼ / ▲ | ↓ / ↑ (myös → / ←, S / W) |
 
+Katse hyppääjässä: kyykky- ja asentomittarin tieto näkyy myös hyppääjässä itsessään (`js/guidance.js`).
+Asento näyttää suunnan – vartalo nousee tai irtoaa suksista, kun pitää nojata eteen, ja painuu kärkien
+päälle, kun pitää nojata taakse. Suksien väri näyttää vakavuuden (vihreä / keltainen / punainen, herkkukaistalla
+vaaleanvihreä), liian korkealla oleva suksen pää hehkuu ja kaatumisvaarassa koko hahmo vilkkuu. Ponnistuksen
+ajoituksen väriliuku on maalattu hyppyrin kylkeen. Mittarit saa alkuruudusta pieniksi, isoiksi tai pois.
+
 Kaatuminen: jos kyykky- tai asentomittarin osoitin on liian kauan mittarin päiden kirkkaanpunaisella
 kaatumisalueella, hyppääjä menettää hallinnan ja kierii alas. Vauhtimäessä kaatunut ei saa tulosta;
 ilmassa kaatuneen pituus mitataan putoamiskohdasta. Rajat ja kierimisen fysiikka: `js/config.js`:n `CRASH`.
@@ -36,6 +42,7 @@ js/wind.js                    tuulimalli
 js/physics.js                 puhtaat fysiikkafunktiot
 js/scoring.js                 pituus- ja tyylipisteet
 js/jump.js                    yhden hypyn tilakone (ei DOMia – ajettavissa myös Nodessa)
+js/guidance.js                ohjaussignaali: asennon poikkeama kaistasta mittareille ja hyppääjän väreille
 js/input.js                   näppäimistö + kosketus -> {action, lean}
 js/storage.js                 localStorage-kääre
 js/leaderboard.js             globaali tulostaulu: nimi + laitetunnus, tuloksen lähetys, top 50

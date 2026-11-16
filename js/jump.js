@@ -5,7 +5,7 @@
 
 import { G, INRUN, TAKEOFF, FLIGHT, LANDING, GATE_TIME, WIND, BAND, CRASH } from './config.js';
 import { clamp, lerp, randn } from './util.js';
-import { inrunAccel, takeoffQuality, lateTakeoffQuality, flightAccel, slideAccel } from './physics.js';
+import { inrunAccel, takeoffQuality, lateTakeoffQuality, flightAccel, slideAccel, aoaOptAt } from './physics.js';
 import { scoreJump, scoreInrunCrash, Outcome } from './scoring.js';
 
 export const Phase = {
@@ -46,7 +46,8 @@ export class Jump {
     this.omega = 0;
     this.posture = 0;           // 0 pysty, 1 lentoasento
     this.aoa = 0;
-    this.bandCenter = 0;        // vihreän kaistan keskikohta suhteessa FLIGHT.aoaOpt:iin (rad)
+    this.aoaOpt = FLIGHT.aoaOpt; // paras kohtauskulma tyynellä juuri nyt: kasvaa lennon aikana
+    this.bandCenter = 0;        // vihreän kaistan keskikohta suhteessa aoaOpt:iin (rad)
     this.bandHalf = BAND.widthCalm * BAND.range; // kaistan puolileveys (rad)
     this.bandError = 0;         // 0..1: osoittimen etäisyys kaistasta
     this.balance = 0;           // kyykkyasennon osoitin -1..1 (+ = asento nousee)
@@ -204,6 +205,7 @@ export class Jump {
   stepFlight(dt, input) {
     const hill = this.hill;
     const wind = this.wind.value;
+    this.aoaOpt = aoaOptAt(this.t);
 
     if (input.action) {
       if (!this.takeoff.pressed && this.t <= TAKEOFF.lateTime) {
@@ -231,7 +233,7 @@ export class Jump {
     // Suksien kulma: pelaajan ohjaus + tuulen pyörteet. Trimmi ei seuraa kaistaa:
     // kun tuuli siirtää kaistaa, pelaajan pitää itse ohjata perässä.
     const turb = (FLIGHT.turbBase + FLIGHT.turbWind * Math.abs(wind)) * Math.sqrt(dt) * randn(this.rng);
-    const trim = (FLIGHT.trimAoa - this.aoa) * FLIGHT.trimRate * this.posture;
+    const trim = (this.aoaOpt + FLIGHT.trimAbove - this.aoa) * FLIGHT.trimRate * this.posture;
     this.omega += (-clamp(input.lean, -1, 1) * FLIGHT.pitchAccel + trim - this.omega * FLIGHT.pitchDamp) * dt + turb;
     this.pitch += this.omega * dt;
     if (this.landPrep) {
@@ -246,8 +248,8 @@ export class Jump {
     this.pitch = clamp(this.pitch, -FLIGHT.pitchLimit, FLIGHT.pitchLimit);
 
     this.updateBand(dt);
-    const aoaOpt = FLIGHT.aoaOpt + this.bandCenter;
-    const acc = flightAccel(this.vx, this.vy, this.pitch, this.posture, wind, this.bandCenter, this.bandHalf);
+    const aoaOpt = this.aoaOpt + this.bandCenter;
+    const acc = flightAccel(this.vx, this.vy, this.pitch, this.posture, wind, this.bandCenter, this.bandHalf, this.aoaOpt);
     this.aoa = acc.aoa;
     const off = Math.abs(this.aoa - aoaOpt);
     this.bandError = this.landPrep ? 0 : clamp((off - this.bandHalf) / BAND.errFull, 0, 1);
@@ -370,7 +372,7 @@ export class Jump {
       this.hit(CRASH.inrunImpact);
     } else {
       // Kärjet liian alhaalla -> kiepsahtaa eteen, liian ylhäällä -> ilma kaataa selälleen
-      this.spin = (this.aoa < FLIGHT.aoaOpt + this.bandCenter ? 1 : -1) * (5 + 4 * rng());
+      this.spin = (this.aoa < this.aoaOpt + this.bandCenter ? 1 : -1) * (5 + 4 * rng());
     }
     this.setPhase(Phase.CRASH);
   }

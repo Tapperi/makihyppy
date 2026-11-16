@@ -65,7 +65,12 @@ export const TAKEOFF = {
 export const FLIGHT = {
   liftK: 0.0086,       // nostekerroin kaistan sisällä (1/m); asento skaalaa tätä, ks. BAND
   drag: 0.0061,        // vastuskerroin lentoasennossa (1/m)
-  aoaOpt: 24 * DEG,    // kaistan keskikohta tyynellä
+  // Paras kohtauskulma (kaistan keskikohta tyynellä) kasvaa lennon aikana: lentorata jyrkkenee, mutta
+  // sukset pysyvät lähellä vaakatasoa. Mitatut arvot ovat noin 25–40°, lopussa suurimmillaan.
+  aoaOpt: 26 * DEG,        // lennon alussa
+  aoaOptLate: 38 * DEG,    // lennon lopussa
+  aoaRampStart: 0.8,       // optimi alkaa kasvaa (s nokalta)
+  aoaRampEnd: 3.8,         // ja on tässä lopullisessa arvossaan (s)
   uprightLift: 0.0008, // pystyasento (ponnistuksen jälkeen / alastuloon valmistautuessa)
   uprightDrag: 0.0062,
   entryPitch: 10 * DEG,     // suksien asento, johon hyppääjä kiertyy itsestään ponnistuksen jälkeen
@@ -76,7 +81,7 @@ export const FLIGHT = {
   pitchAccel: 150 * DEG,    // ohjauksen kulmakiihtyvyys
   pitchDamp: 4.2,
   pitchLimit: 55 * DEG,
-  trimAoa: 30 * DEG,        // kohtauskulma, johon sukset pyrkivät itsestään: aina kaistan yläpuolella -> pelaajan pitää painaa eteen
+  trimAbove: 8 * DEG,       // sukset pyrkivät itsestään näin paljon optimin yläpuolelle: aina kaistan yläpuolella -> pelaajan pitää painaa eteen
   trimRate: 8,              // palauttavan momentin voimakkuus (1/s²)
   windTilt: 18 * DEG,       // tuuli myötäilee rinnettä: vastatuuli puhaltaa hieman ylöspäin
   turbBase: 5 * DEG,        // tuulen pyörteiden vaikutus asentoon
@@ -179,7 +184,7 @@ export const BAND = {
  * ole vertailukelpoisia – myös worker/src/index.js:n SEASON. Uusi kausi alkaa tyhjältä
  * taululta; kausien nimet ovat workerissa.
  */
-export const SEASON = 2;
+export const SEASON = 3;
 
 export const LEADERBOARD = {
   url: 'https://tuulimaki-scores.tapperi.workers.dev', // näkyy `wrangler deploy` -komennon tulosteessa

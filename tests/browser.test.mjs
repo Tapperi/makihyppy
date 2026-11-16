@@ -63,7 +63,7 @@ async function steerFlight() {
   let down = false;
   for (;;) {
     const s = await page.eval(`(() => { const j = ${G}.jump;
-      return { flight: j.phase === 'flight', err: (j.aoa - 24 * Math.PI / 180 - j.bandCenter) * 180 / Math.PI }; })()`);
+      return { flight: j.phase === 'flight', err: (j.aoa - j.aoaOpt - j.bandCenter) * 180 / Math.PI }; })()`);
     if (!s.flight) break;
     const want = s.err > 1;
     if (want !== down) { await page.key('ArrowDown', want ? 'down' : 'up'); down = want; }
@@ -105,7 +105,7 @@ try {
   for (;;) {
     const s = await page.eval(`(() => { const j = ${G}.jump; const sl = j.hill.slopeAtX(j.x);
       const closing = -(j.vx * Math.sin(sl) + j.vy * Math.cos(sl));
-      return { phase: j.phase, t: j.t, err: (j.aoa - 24 * Math.PI / 180 - j.bandCenter) * 180 / Math.PI, ttg: closing > 0.1 ? j.height / closing : 99, prep: j.landPrep }; })()`);
+      return { phase: j.phase, t: j.t, err: (j.aoa - j.aoaOpt - j.bandCenter) * 180 / Math.PI, ttg: closing > 0.1 ? j.height / closing : 99, prep: j.landPrep }; })()`);
     if (s.phase !== 'flight') break;
     const want = s.err > 1;
     if (want !== down) { await page.key('ArrowDown', want ? 'down' : 'up'); down = want; }

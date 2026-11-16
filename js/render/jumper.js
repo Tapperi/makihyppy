@@ -21,14 +21,32 @@ const KEYS = ['shin', 'thigh', 'torso', 'arm', 'split'];
 const lerp = (a, b, t) => a + (b - a) * t;
 const NO_WOBBLE = { roll: 0, skiA: 0, skiB: 0, torso: 0, arm: 0 };
 
+// Ohjaussignaalin (guidance.js: lean -1..1) siirtymät asteina täydellä poikkeamalla.
+// high = osoitin ylhäällä: pitää nojata eteen. low = osoitin alhaalla: pitää nojata taakse.
+const LEAN = {
+  // Vauhtimäki: asento nousee ja paino valuu kantapäille / hyppääjä painuu kärkien päälle
+  crouch: {
+    high: { shin: 14, thigh: -16, torso: 26, arm: 10 },
+    low: { shin: -11, thigh: 6, torso: -15, arm: -8 },
+  },
+  // Lento: vartalo irtoaa suksista purjeeksi / liimautuu suksiin ja pää menee kärkien yli
+  flight: {
+    high: { shin: 8, thigh: 14, torso: 20, arm: 26 },
+    low: { shin: -8, thigh: -8, torso: -14, arm: -13 },
+  },
+};
+const LEAN_KEYS = ['shin', 'thigh', 'torso', 'arm'];
+
 const LEN = { shin: 0.46, thigh: 0.46, torso: 0.62, arm: 0.6, neck: 0.2 };
 const SKI_BACK = -0.95, SKI_FRONT = 1.5;
 
+// Puku ja sukset ovat tarkoituksella muuta kuin vihreää, keltaista tai punaista:
+// ne värit on varattu ohjaussignaalille (guidance.js).
 export const COLORS = {
-  suit: '#e2383f',
-  suitDark: '#a8242b',
+  suit: '#2f7fd6',
+  suitDark: '#1f579c',
   helmet: '#1d3557',
-  ski: '#ffcf33',
+  ski: '#2b3340',
   boot: '#20242c',
   glove: '#20242c',
 };
@@ -40,6 +58,8 @@ export class JumperSprite {
     this.skis = true;      // false, kun sukset ovat irronneet kaatuessa
     this.limp = false;     // holtiton ragdoll: molemmat kädet piirretään
     this.flail = 0;        // raajojen heilunnan vaihe
+    this.lean = 0;         // pehmennetty ohjaussignaali -1..1
+    this.leanKind = 'crouch';
   }
 
   snap(pose) {
@@ -48,6 +68,7 @@ export class JumperSprite {
     this.skis = true;
     this.limp = false;
     this.flail = 0;
+    this.lean = 0;
   }
 
   /** Isku heittää raajat äkisti uuteen asentoon. */
@@ -66,8 +87,12 @@ export class JumperSprite {
 
   /**
    * @param energy 0..1: kaatuessa kuinka rajusti raajat heiluvat (0 = makaa paikallaan)
+   * @param lean   -1..1: ohjaussignaali, näkyy vain kyykyssä ja lentoasennossa
    */
-  update(dt, pose, energy = 0) {
+  update(dt, pose, energy = 0, lean = 0) {
+    const guided = pose === 'crouch' || pose === 'flight';
+    if (guided) this.leanKind = pose;
+    this.lean += ((guided ? lean : 0) - this.lean) * (1 - Math.exp(-dt * 16));
     this.limp = pose === 'ragdoll';
     if (this.limp) {
       // Raajat viuhtovat eri tahtiin vauhdin mukana; vauhdin loputtua hyppääjä jää makaamaan
@@ -99,10 +124,17 @@ export class JumperSprite {
    * @param scale  px / m
    * @param pitch  suksien kulma vaakatasosta (rad, + = kärjet ylös)
    * @param wob    huojunta: {roll, skiA, skiB (rad), torso, arm (astetta)} tai null
+   * @param look   ohjausvärit: {ski, halo, haloAlpha, high} tai null.
+   *               ski = suksien väri, halo = hahmon ääriviivan väri (tai null),
+   *               high = -1..1: kumpi suksen pää on liian korkealla (+ = kärki) – se pää hehkuu
    */
-  draw(ctx, X, Y, scale, pitch, wob = null) {
+  draw(ctx, X, Y, scale, pitch, wob = null, look = null) {
     const w = wob ?? NO_WOBBLE;
     const c = { ...this.cur };
+    if (Math.abs(this.lean) > 0.002) {
+      const d = LEAN[this.leanKind][this.lean > 0 ? 'high' : 'low'], amount = Math.abs(this.lean);
+      for (const key of LEAN_KEYS) c[key] += d[key] * amount;
+    }
     c.torso += w.torso;
     c.thigh += w.torso * 0.4;
     c.arm += w.arm;
@@ -116,26 +148,39 @@ export class JumperSprite {
     ctx.lineCap = 'round';
     ctx.lineJoin = 'round';
 
-    const line = (a, b, width, color) => {
-      ctx.strokeStyle = color;
-      ctx.lineWidth = width;
-      ctx.beginPath();
-      ctx.moveTo(a[0], a[1]);
-      ctx.lineTo(b[0], b[1]);
-      ctx.stroke();
-    };
     const ski = (footX, tilt) => {
       if (!this.skis) return;
       ctx.save();
       ctx.translate(footX, 0.03);
       ctx.rotate(tilt);
-      ctx.strokeStyle = COLORS.ski;
-      ctx.lineWidth = 0.07;
-      ctx.beginPath();
-      ctx.moveTo(SKI_BACK, 0);
-      ctx.lineTo(SKI_FRONT - 0.12, 0);
-      ctx.quadraticCurveTo(SKI_FRONT, 0, SKI_FRONT + 0.03, 0.09); // kärjen taivutus
-      ctx.stroke();
+      const stroke = (color, width, from = SKI_BACK, to = SKI_FRONT) => {
+        ctx.strokeStyle = color;
+        ctx.lineWidth = width;
+        ctx.beginPath();
+        ctx.moveTo(from, 0);
+        if (to < SKI_FRONT) ctx.lineTo(to, 0);
+        else {
+          ctx.lineTo(SKI_FRONT - 0.12, 0);
+          ctx.quadraticCurveTo(SKI_FRONT, 0, SKI_FRONT + 0.03, 0.09); // kärjen taivutus
+        }
+        ctx.stroke();
+      };
+      if (!look) stroke(COLORS.ski, 0.07);
+      else {
+        // Sukset ovat mittarin osoitin: hehku, tumma reunus ja tilan värinen ydin
+        ctx.globalAlpha = 0.3;
+        stroke(look.ski, 0.3);
+        ctx.globalAlpha = 1;
+        stroke(COLORS.ski, 0.17);
+        stroke(look.ski, 0.1);
+        if (Math.abs(look.high) > 0.02) {
+          // Liian korkealla oleva pää hehkuu: "paina kirkas pää alas"
+          ctx.globalAlpha = Math.min(1, Math.abs(look.high) * 1.3);
+          if (look.high > 0) stroke('#ffffff', 0.1, SKI_FRONT - 0.85);
+          else stroke('#ffffff', 0.1, SKI_BACK, SKI_BACK + 0.85);
+          ctx.globalAlpha = 1;
+        }
+      }
       ctx.restore();
     };
 
@@ -158,36 +203,56 @@ export class JumperSprite {
     const head = add(shoulder, dir(c.torso + 8), LEN.neck);
     const hand = add(shoulder, dir(c.arm), LEN.arm);
 
+    // Hahmon osat piirtojärjestyksessä: viivat [a, b, leveys, väri] ja pallot [keskipiste, säde, väri]
+    const parts = [];
     // Takajalka: kaksiniveinen IK lonkasta takamonoon, polvi eteenpäin
     if (c.split > 0.02) {
       const backKnee = solveKnee(hip, backFoot, LEN.thigh, LEN.shin);
-      line(hip, backKnee, 0.17, COLORS.suitDark);
-      line(backKnee, backFoot, 0.15, COLORS.suitDark);
-      line(backFoot, [backFoot[0] + 0.2, 0.02], 0.13, COLORS.boot);
+      parts.push([hip, backKnee, 0.17, COLORS.suitDark]);
+      parts.push([backKnee, backFoot, 0.15, COLORS.suitDark]);
+      parts.push([backFoot, [backFoot[0] + 0.2, 0.02], 0.13, COLORS.boot]);
     }
-
     // Holtittomasti pyörivällä hyppääjällä näkyy myös toinen käsi
     if (this.limp) {
       const hand2 = add(shoulder, dir(c.arm + 150 + 40 * Math.sin(this.flail * 1.3)), LEN.arm);
-      line(shoulder, hand2, 0.11, COLORS.suitDark);
-      ctx.fillStyle = COLORS.glove;
-      ctx.beginPath(); ctx.arc(hand2[0], hand2[1], 0.07, 0, Math.PI * 2); ctx.fill();
+      parts.push([shoulder, hand2, 0.11, COLORS.suitDark]);
+      parts.push([hand2, 0.07, COLORS.glove]);
     }
-
     // Etujalka
-    line(frontFoot, [frontFoot[0] + 0.22, 0.02], 0.13, COLORS.boot);
-    line(frontFoot, knee, 0.16, COLORS.suit);
-    line(knee, hip, 0.19, COLORS.suit);
+    parts.push([frontFoot, [frontFoot[0] + 0.22, 0.02], 0.13, COLORS.boot]);
+    parts.push([frontFoot, knee, 0.16, COLORS.suit]);
+    parts.push([knee, hip, 0.19, COLORS.suit]);
     // Vartalo, käsi, pää
-    line(hip, shoulder, 0.25, COLORS.suit);
-    line(shoulder, hand, 0.11, COLORS.suitDark);
-    ctx.fillStyle = COLORS.glove;
-    ctx.beginPath(); ctx.arc(hand[0], hand[1], 0.07, 0, Math.PI * 2); ctx.fill();
-    ctx.fillStyle = COLORS.helmet;
-    ctx.beginPath(); ctx.arc(head[0], head[1], 0.135, 0, Math.PI * 2); ctx.fill();
+    parts.push([hip, shoulder, 0.25, COLORS.suit]);
+    parts.push([shoulder, hand, 0.11, COLORS.suitDark]);
+    parts.push([hand, 0.07, COLORS.glove]);
+    parts.push([head, 0.135, COLORS.helmet]);
     // Lasit
     const gd = dir(c.torso - 55);
-    line(add(head, gd, 0.07), add(head, gd, 0.135), 0.07, '#f4f1de');
+    parts.push([add(head, gd, 0.07), add(head, gd, 0.135), 0.07, '#f4f1de']);
+
+    const paint = (grow, override) => {
+      for (const p of parts) {
+        if (p.length === 4) {
+          ctx.strokeStyle = override ?? p[3];
+          ctx.lineWidth = p[2] + grow;
+          ctx.beginPath();
+          ctx.moveTo(p[0][0], p[0][1]);
+          ctx.lineTo(p[1][0], p[1][1]);
+          ctx.stroke();
+        } else {
+          ctx.fillStyle = override ?? p[2];
+          ctx.beginPath(); ctx.arc(p[0][0], p[0][1], p[1] + grow / 2, 0, Math.PI * 2); ctx.fill();
+        }
+      }
+    };
+    if (look?.halo) {
+      // Ääriviiva tilan värillä: varoitus näkyy koko hahmossa
+      ctx.globalAlpha = look.haloAlpha;
+      paint(0.16, look.halo);
+      ctx.globalAlpha = 1;
+    }
+    paint(0, null);
     ctx.restore();
 
     // Etusuksi päällimmäiseksi

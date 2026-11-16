@@ -28,6 +28,17 @@ export function getBest(hillId) {
   return seasonData(read()).best?.[hillId] ?? null;
 }
 
+/** Laitekohtainen asetus (esim. mittarien koko) tai oletusarvo. */
+export function getSetting(key, fallback) {
+  return read().settings?.[key] ?? fallback;
+}
+
+export function saveSetting(key, value) {
+  const data = read();
+  (data.settings ??= {})[key] = value;
+  write(data);
+}
+
 /** Tulostaulun pelaaja: {name, deviceId} tai null. */
 export function getPlayer() {
   return read().player ?? null;

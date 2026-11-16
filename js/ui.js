@@ -19,6 +19,8 @@ const OUTCOME_TEXT = {
   fall: 'Kaatuminen',
 };
 
+const GAUGE_LABEL = { small: 'pienet', full: 'isot', off: 'pois' };
+
 const fmt = (v) => v.toFixed(1).replace('.', ',');
 
 export class Ui {
@@ -190,6 +192,9 @@ export class Ui {
     el.hidden = !text;
     el.classList.toggle('good', good);
   }
+
+  onGauges(fn) { $('btn-gauges').addEventListener('click', fn); }
+  setGauges(mode) { $('btn-gauges').textContent = `Mittarit: ${GAUGE_LABEL[mode]}`; }
 
   onStart(fn) { $('btn-start').addEventListener('click', fn); }
   onAgain(fn) { $('btn-again').addEventListener('click', fn); }

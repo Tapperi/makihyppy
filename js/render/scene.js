@@ -4,6 +4,9 @@
 import { Phase } from '../jump.js';
 import { makeRng, clamp, lerp } from '../util.js';
 import { JumperSprite, COLORS } from './jumper.js';
+import { TAKEOFF } from '../config.js';
+import { takeoffQuality } from '../physics.js';
+import { guidance, takeoffFlash, GUIDE_COLOR, DANGER_COLOR } from '../guidance.js';
 
 const VIEW_METERS = 22;     // ruudun lyhyemmälle sivulle mahtuva matka
 const JUMPER_SCALE = 1.5;  // hyppääjä piirretään hieman luonnollista suurempana
@@ -18,6 +21,8 @@ const CAM_OFFSET = {
 };
 
 const SKI_LENGTH = 2.45;    // irronneen suksen pituus (m)
+const BODY_WOBBLE = 0.35;   // asentovirheen osuus vartalon huojunnasta: suunnan näyttää asento (guidance.js)
+const STREAK_RGB = { good: '235, 246, 255', sweet: '235, 246, 255', warn: '255, 226, 120', bad: '255, 150, 130' };
 
 export class Scene {
   constructor(canvas, hill) {
@@ -33,6 +38,8 @@ export class Scene {
     this.lastPhase = null;
     this.wobble = 0;       // 0..1: huojunnan amplitudi (asentovirhe + puuska), pehmennetty
     this.shx = 0; this.shy = 0; // kameran tärinä (px)
+    this.guide = guidance({});  // ohjaussignaali: hyppääjän asento ja värit
+    this.danger = 0;
     this.streaks = [];     // ilmavirtaviivat hyppääjän ympärillä
     this.streakDebt = 0;
     // Kaatumisen tehosteet
@@ -118,6 +125,8 @@ export class Scene {
     this.particles.length = 0;
     this.streaks.length = 0;
     this.wobble = 0; this.shx = 0; this.shy = 0;
+    this.guide = guidance(jump);
+    this.danger = 0;
     this.debris.length = 0;
     this.bursts.length = 0;
     this.shake = 0; this.flash = 0; this.hitStop = 0; this.camH = 0;
@@ -146,7 +155,9 @@ export class Scene {
     cam.x = nx; cam.y = ny;
 
     const energy = crashed ? clamp(Math.max(Math.abs(jump.spin) / 6, jump.speed / 14), 0, 1) : 0;
-    this.sprite.update(dt, jump.pose, energy);
+    this.guide = guidance(jump);
+    this.danger = jump.danger;
+    this.sprite.update(dt, jump.pose, energy, this.guide.lean);
     this.updateWobble(jump, wind, dt);
     this.updateStreaks(jump, wind, dt);
     this.updateCrashFx(jump, dt);
@@ -199,13 +210,31 @@ export class Scene {
   wobbleOffsets() {
     const a = this.wobble, t = this.time;
     if (a < 0.004) return null;
+    // Hidas keinunta peittäisi asennon kertoman korjaussuunnan: täysi keinunta vasta kaatumisvaarassa
+    const b = Math.max(a * BODY_WOBBLE, this.danger);
     return {
-      roll: a * 0.07 * Math.sin(t * 5.3),                                   // koko hyppääjä keinuu
+      roll: b * 0.07 * Math.sin(t * 5.3),                                   // koko hyppääjä keinuu
       skiA: a * 0.13 * Math.sin(t * 31),                                    // sukset väpättävät eri tahtiin
       skiB: a * 0.13 * Math.sin(t * 27 + 1.3),
-      torso: a * (10 * Math.sin(t * 6.5) + 3 * Math.sin(t * 11.3 + 0.7)),   // vartalo keinuu (astetta)
-      arm: a * (24 * Math.sin(t * 9.1 + 2) + 8 * Math.sin(t * 17)),         // kädet ja hartiat heiluvat
+      torso: b * (10 * Math.sin(t * 6.5) + 3 * Math.sin(t * 11.3 + 0.7)),   // vartalo keinuu (astetta)
+      arm: b * (24 * Math.sin(t * 9.1 + 2) + 8 * Math.sin(t * 17)),         // kädet ja hartiat heiluvat
     };
+  }
+
+  /** Hyppääjän ohjausvärit (ks. JumperSprite.draw) tai null, kun signaalia ei ole. */
+  jumperLook(jump) {
+    const flash = takeoffFlash(jump);
+    if (flash) return { ski: flash, halo: flash, haloAlpha: 0.55, high: 0 };
+    const g = this.guide;
+    if (!g.active || g.weight < 0.3) return null;
+    const high = g.severity > 0 ? g.lean : 0;
+    if (jump.danger > 0) {
+      // Kaatumisvaara: koko hahmo vilkkuu
+      const blink = Math.sin(this.time * 40) > 0 ? '#ffffff' : DANGER_COLOR;
+      return { ski: blink, halo: blink, haloAlpha: 0.9, high };
+    }
+    const color = GUIDE_COLOR[g.state];
+    return { ski: color, halo: g.severity > 0 ? color : null, haloAlpha: 0.35 + 0.45 * g.severity, high };
   }
 
   // --- Ilmavirtaviivat: suoria ja sileitä hyvässä asennossa, vääristyvät huonossa ---
@@ -244,8 +273,8 @@ export class Scene {
     if (!this.streaks.length) return;
     const sc = this.scale, X = this.sx(jump.x), Y = this.sy(jump.y) - sc * 0.6;
     const boost = Math.max(this.wobble, wind.gustAlert || 0);
-    // Väri seuraa mittaria: valkoinen -> keltainen -> punainen
-    const rgb = this.wobble < 0.25 ? '235, 246, 255' : this.wobble < 0.6 ? '255, 226, 120' : '255, 150, 130';
+    // Väri seuraa ohjaussignaalia: valkoinen -> keltainen -> punainen
+    const rgb = STREAK_RGB[this.guide.state] ?? STREAK_RGB.good;
     ctx.lineWidth = 1.5 + boost;
     ctx.lineCap = 'round';
     for (const s of this.streaks) {
@@ -552,6 +581,8 @@ export class Scene {
     for (let i = 0; i < inr.n; i++) ctx.lineTo(this.sx(inr.x[i]), this.sy(inr.y[i]));
     ctx.stroke();
 
+    this.drawTakeoffZone(ctx);
+
     // Lähtökoppi radan yläpäässä ja lähtöpuomi
     const top = hill.inrunPos(hill.inrunTop);
     const X = this.sx(top.x), Y = this.sy(top.y);
@@ -572,6 +603,39 @@ export class Scene {
     ctx.beginPath();
     ctx.moveTo(this.sx(gate.x - Math.sin(gate.angle) * 0.1), this.sy(gate.y - Math.cos(gate.angle) * 0.1));
     ctx.lineTo(this.sx(gate.x + Math.sin(gate.angle) * 0.75), this.sy(gate.y + Math.cos(gate.angle) * 0.75));
+    ctx.stroke();
+  }
+
+  /**
+   * Ponnistusalue: radan kylkeen maalattu väriliuku ponnistuksen tehon mukaan (sama kuin
+   * ponnistuspalkissa) ja viiva parhaassa kohdassa. Ajoituksen näkee katsomalla hyppääjää ja nokkaa.
+   */
+  drawTakeoffZone(ctx) {
+    const hill = this.hill, sc = this.scale;
+    const DEPTH = 0.62; // kaistan keskilinja radan pinnasta alaspäin (m)
+    const side = (d, depth) => {
+      const p = hill.inrunPos(d);
+      return [this.sx(p.x - Math.sin(p.angle) * depth), this.sy(p.y - Math.cos(p.angle) * depth)];
+    };
+    const [x0, y0] = side(0, DEPTH), [x1, y1] = side(TAKEOFF.zone, DEPTH);
+    const g = ctx.createLinearGradient(x0, y0, x1, y1);
+    for (let i = 0; i <= 20; i++) {
+      const q = takeoffQuality((i / 20) * TAKEOFF.zone);
+      // 0 = punainen, 120 = vihreä. Kaukana nokasta kaista häipyy pois, ettei pitkä punainen osuus hallitse kuvaa.
+      g.addColorStop(i / 20, `hsla(${q * q * 120}, 78%, ${38 + q * 12}%, ${Math.min(1, q * 2.5)})`);
+    }
+    ctx.strokeStyle = g;
+    ctx.lineWidth = sc * 0.6;
+    ctx.lineCap = 'butt';
+    ctx.beginPath();
+    for (let d = 0; d <= TAKEOFF.zone; d += 0.5) ctx.lineTo(...side(d, DEPTH));
+    ctx.stroke();
+    // Paras ponnistuskohta
+    ctx.strokeStyle = '#ffffff';
+    ctx.lineWidth = Math.max(2, sc * 0.16);
+    ctx.beginPath();
+    ctx.moveTo(...side(TAKEOFF.optimum, 0.2));
+    ctx.lineTo(...side(TAKEOFF.optimum, 1.05));
     ctx.stroke();
   }
 
@@ -631,7 +695,7 @@ export class Scene {
     }
     if (jump.crash) { this.drawRagdoll(ctx, jump, X, Y); return; }
     if (jump.outcome === 'fall' && jump.phase !== Phase.FLIGHT) { this.drawSnowball(ctx, jump, X, Y); return; }
-    this.sprite.draw(ctx, X, Y, sc * JUMPER_SCALE, jump.pitch, this.wobbleOffsets());
+    this.sprite.draw(ctx, X, Y, sc * JUMPER_SCALE, jump.pitch, this.wobbleOffsets(), this.jumperLook(jump));
   }
 
   // --- Hallintansa menettänyt hyppääjä: pyörii lantionsa ympäri raajat viuhtoen ---

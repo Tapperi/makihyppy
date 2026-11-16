@@ -2,7 +2,9 @@
 //   node tests/sim.test.mjs
 
 import assert from 'node:assert/strict';
-import { HILLS, WIND, STEP, BAND, DEG } from '../js/config.js';
+import { HILLS, WIND, STEP, BAND, DEG, INRUN, FLIGHT, CRASH } from '../js/config.js';
+import { Phase } from '../js/jump.js';
+import { guidance } from '../js/guidance.js';
 import { createHill } from '../js/hill.js';
 import { Wind } from '../js/wind.js';
 import { distancePoints, scoreJump } from '../js/scoring.js';
@@ -164,6 +166,40 @@ test('vaihtelevassa tuulessa hyvä botti hyppää uskottavia pituuksia', () => {
   const min = Math.min(...ds), max = Math.max(...ds);
   console.log(`      pituudet ${min}–${max} m, keskiarvo ${(ds.reduce((a, b) => a + b) / ds.length).toFixed(1)} m`);
   assert.ok(min > 95 && max < 142, `${min}..${max}`);
+});
+
+test('ohjaussignaali: suunta, tila ja vakavuus vastaavat mittaria', () => {
+  const HALF = INRUN.balanceHalf;
+  const inrun = (balance) => guidance({
+    phase: Phase.INRUN, takeoff: { pressed: false }, balance,
+    balanceError: Math.min(1, Math.max(0, (Math.abs(balance) - HALF) / INRUN.balanceErrFull)),
+  });
+  assert.equal(inrun(0).state, 'good');
+  assert.equal(inrun(0).lean, 0);
+  assert.ok(inrun(0.15).lean > 0 && inrun(-0.15).lean < 0, 'suunta näkyy jo kaistan sisällä');
+  assert.equal(inrun(0.15).state, 'good');
+  assert.equal(inrun(HALF + 0.1).state, 'warn');
+  assert.equal(inrun(-(HALF + 0.3)).state, 'bad');
+  const limit = HALF + CRASH.inrunError * INRUN.balanceErrFull;
+  assert.ok(Math.abs(inrun(limit).lean - 1) < 1e-9 && Math.abs(inrun(-limit).lean + 1) < 1e-9, 'kaatumisrajalla täysi asento');
+  let prev = -2;
+  for (let b = -1; b <= 1; b += 0.05) { const l = inrun(b).lean; assert.ok(l >= prev, 'asento muuttuu tasaisesti'); prev = l; }
+
+  const half = 4 * DEG;
+  const flight = (e, extra = {}) => guidance({
+    phase: Phase.FLIGHT, landPrep: false, posture: 1, bandCenter: 0, bandHalf: half, aoaOpt: FLIGHT.aoaOpt, aoa: FLIGHT.aoaOpt + e, ...extra,
+  });
+  assert.equal(flight(0).state, 'good');
+  assert.equal(flight(-half + 0.5 * DEG).state, 'sweet', 'herkkukaista etureunassa');
+  assert.ok(flight(half + 2 * DEG).lean > 0, 'kärjet liian ylhäällä -> nojaa eteen');
+  assert.ok(flight(-half - 1 * DEG).lean < 0, 'kärjet liian alhaalla -> nojaa taakse');
+  // Etureunan alla kaatumisraja on lähempänä: sama ylitys on siellä vakavampi
+  assert.ok(flight(-half - 2 * DEG).severity > flight(half + 2 * DEG).severity);
+  assert.equal(flight(-half - 2 * DEG).state, 'bad');
+  assert.equal(flight(half + 2 * DEG).state, 'warn');
+  assert.equal(flight(half + 2 * DEG, { posture: 0 }).lean, 0, 'ei signaalia ennen lentoasentoa');
+  assert.equal(flight(0, { landPrep: true }).active, false, 'alastuloon valmistautuessa ei signaalia');
+  assert.equal(guidance({ phase: Phase.SLIDE }).active, false);
 });
 
 console.log(`${passed} testiä OK`);

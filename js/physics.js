@@ -41,24 +41,31 @@ export function posturePerf(e, half) {
   return Math.max(BAND.backMin, 1 - ((e - half) / BAND.backWidth) * (1 - BAND.backMin));
 }
 
+/** Paras kohtauskulma tyynellä, kun lentoa on kulunut t sekuntia (ks. FLIGHT.aoaOpt). */
+export function aoaOptAt(t) {
+  const u = clamp((t - FLIGHT.aoaRampStart) / (FLIGHT.aoaRampEnd - FLIGHT.aoaRampStart), 0, 1);
+  return lerp(FLIGHT.aoaOpt, FLIGHT.aoaOptLate, u * u * (3 - 2 * u));
+}
+
 /**
  * Lennon aerodynamiikka.
  * @param vx,vy   nopeus maan suhteen
  * @param pitch   suksien kulma vaakatasosta (+ = kärjet ylös)
  * @param posture 0 = pystyssä, 1 = täysi lentoasento
  * @param wind    vastatuuli m/s
- * @param bandCenter kaistan keskikohta suhteessa FLIGHT.aoaOpt:iin (tuuli siirtää sitä)
+ * @param bandCenter kaistan keskikohta suhteessa aoaOpt:iin (tuuli siirtää sitä)
  * @param bandHalf   kaistan puolileveys
+ * @param aoaOpt     paras kohtauskulma tyynellä tällä hetkellä (aoaOptAt)
  * @returns {ax, ay, aoa}
  */
-export function flightAccel(vx, vy, pitch, posture, wind, bandCenter = 0, bandHalf = BAND.widthCalm * BAND.range) {
+export function flightAccel(vx, vy, pitch, posture, wind, bandCenter = 0, bandHalf = BAND.widthCalm * BAND.range, aoaOpt = FLIGHT.aoaOpt) {
   // Ilman suhteellinen nopeus. Tuuli myötäilee rinnettä.
   const rx = vx + wind * Math.cos(FLIGHT.windTilt);
   const ry = vy - wind * Math.sin(FLIGHT.windTilt);
   const speed = Math.hypot(rx, ry);
   const aoa = pitch - Math.atan2(ry, rx);
 
-  const perf = posturePerf(aoa - FLIGHT.aoaOpt - bandCenter, bandHalf);
+  const perf = posturePerf(aoa - aoaOpt - bandCenter, bandHalf);
   const kL = lerp(FLIGHT.uprightLift, FLIGHT.liftK * perf, posture);
   const kD = lerp(FLIGHT.uprightDrag, FLIGHT.drag, posture);
 

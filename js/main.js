@@ -6,9 +6,9 @@ import { Wind } from './wind.js';
 import { Jump, Phase } from './jump.js';
 import { Input } from './input.js';
 import { Scene } from './render/scene.js';
-import { Hud } from './render/hud.js';
+import { Hud, GAUGE_MODES } from './render/hud.js';
 import { Ui } from './ui.js';
-import { getBest, recordJump } from './storage.js';
+import { getBest, recordJump, getSetting, saveSetting } from './storage.js';
 import { makeRng } from './util.js';
 import * as lb from './leaderboard.js';
 import { makeTabloid } from './tabloid.js';
@@ -176,6 +176,14 @@ function frame(ts) {
 // --- Käynnistys ---
 input.attach({ canvas, btnAction: ui.btnAction, btnFwd: ui.btnFwd, btnBack: ui.btnBack });
 ui.onStart(start);
+// Mittarien koko: hyppääjä näyttää saman tiedon, joten mittarit voi pienentää tai piilottaa
+hud.gauges = GAUGE_MODES.includes(getSetting('gauges')) ? getSetting('gauges') : GAUGE_MODES[0];
+ui.setGauges(hud.gauges);
+ui.onGauges(() => {
+  hud.gauges = GAUGE_MODES[(GAUGE_MODES.indexOf(hud.gauges) + 1) % GAUGE_MODES.length];
+  saveSetting('gauges', hud.gauges);
+  ui.setGauges(hud.gauges);
+});
 if (lb.enabled) ui.onBoard(() => ui.showBoard((season) => lb.fetchTop(hill.def.id, season), lb.playerName()));
 ui.onTabloid(() => closeTabloid(performance.now() / 1000));
 ui.onAgain(() => { if (!ui.modalOpen && performance.now() / 1000 - resultShownAt > 0.25) newJump(); });
@@ -196,4 +204,4 @@ if ('serviceWorker' in navigator && location.protocol !== 'file:') {
 }
 
 // Testausta ja vianetsintää varten (ei käytetä pelilogiikassa)
-window.__game = { jump, wind, hill, input, get mode() { return mode; } };
+window.__game = { jump, wind, hill, input, hud, scene, get mode() { return mode; } };

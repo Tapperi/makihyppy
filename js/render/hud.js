@@ -4,6 +4,7 @@ import { Phase } from '../jump.js';
 import { INRUN, TAKEOFF, FLIGHT, WIND, BAND, CRASH, DEG } from '../config.js';
 import { takeoffQuality, lateTakeoffQuality } from '../physics.js';
 import { clamp } from '../util.js';
+import { guidance, qualityColor, GUIDE_COLOR, DANGER_COLOR } from '../guidance.js';
 
 // Vanhemmissa selaimissa (esim. Safari < 16) ei ole roundRectia: käytä suorakulmiota
 if (typeof CanvasRenderingContext2D !== 'undefined' && !CanvasRenderingContext2D.prototype.roundRect) {
@@ -12,8 +13,13 @@ if (typeof CanvasRenderingContext2D !== 'undefined' && !CanvasRenderingContext2D
 
 const FONT = 'system-ui, -apple-system, "Segoe UI", Roboto, sans-serif';
 const PANEL = 'rgba(13, 27, 42, 0.72)';
-const GOOD = '#52d273', WARN = '#ffd23f', BAD = '#ff5d5d';
-const RED_ZONE = '#7a2e39', CRASH_ZONE = '#e0102e'; // mittarin punainen ja sen kaatumisalue
+const { good: GOOD, warn: WARN, bad: BAD } = GUIDE_COLOR;
+const IDLE = '#9db4c8';
+const RED_ZONE = '#7a2e39', CRASH_ZONE = DANGER_COLOR; // mittarin punainen ja sen kaatumisalue
+
+/** Mittarien koko. Hyppääjä näyttää saman tiedon (guidance.js), joten mittarit ovat oletuksena pienet. */
+export const GAUGE_MODES = ['small', 'full', 'off'];
+const SMALL_SCALE = 0.62, SMALL_ALPHA = 0.8;
 
 const fmt = (v) => v.toFixed(1).replace('.', ',');
 
@@ -22,10 +28,6 @@ function panel(ctx, x, y, w, h) {
   ctx.beginPath();
   ctx.roundRect(x, y, w, h, 10);
   ctx.fill();
-}
-
-function qualityColor(q) {
-  return q >= 0.9 ? GOOD : q >= 0.6 ? WARN : BAD;
 }
 
 /** Leveässä (selain)näkymässä asentomittari on keskellä ponnistuspalkin paikalla, kapeassa oikeassa reunassa. */
@@ -71,6 +73,21 @@ export class Hud {
     this.ctx = ctx;
     this.barGradient = null;
     this.barKey = '';
+    this.gauges = GAUGE_MODES[0]; // 'small' | 'full' | 'off'
+  }
+
+  /** Piirtää mittarin asetuksen mukaisessa koossa: pienenä se kutistuu kohti pistettä (cx, cy). */
+  gauge(cx, cy, fn) {
+    if (this.gauges === 'off') return;
+    if (this.gauges === 'full') { fn(); return; }
+    const ctx = this.ctx;
+    ctx.save();
+    ctx.translate(cx, cy);
+    ctx.scale(SMALL_SCALE, SMALL_SCALE);
+    ctx.translate(-cx, -cy);
+    ctx.globalAlpha = SMALL_ALPHA;
+    fn();
+    ctx.restore();
   }
 
   /**
@@ -115,9 +132,13 @@ export class Hud {
     const inAir = jump.phase === Phase.FLIGHT;
     // Leveässä näkymässä mittari korvaa ponnistuspalkin heti kun se tulee näkyviin
     const barUntil = isWide(view) ? GAUGE_SHOW : 1.3;
-    if (jump.phase === Phase.INRUN || (inAir && jump.t <= barUntil)) this.drawTakeoffBar(view, jump);
-    if (jump.phase === Phase.INRUN) this.drawBalanceGauge(view, jump);
-    if (inAir && jump.t > GAUGE_SHOW) this.drawAoaGauge(view, jump, wind);
+    // Pienenä mittarit kutistuvat yläreunaansa (kapeassa näkymässä oikeaan yläkulmaansa) päin
+    const anchor = (r) => [isWide(view) ? r.x + r.gw / 2 + 7 : r.x + r.gw + 24, r.y - 22];
+    if (jump.phase === Phase.INRUN || (inAir && jump.t <= barUntil)) {
+      this.gauge(view.W / 2, top + BAR_Y - 6, () => this.drawTakeoffBar(view, jump));
+    }
+    if (jump.phase === Phase.INRUN) this.gauge(...anchor(balanceRect(view)), () => this.drawBalanceGauge(view, jump));
+    if (inAir && jump.t > GAUGE_SHOW) this.gauge(...anchor(gaugeRect(view)), () => this.drawAoaGauge(view, jump, wind));
     this.drawMessage(view, jump);
   }
 
@@ -264,8 +285,8 @@ export class Hud {
   drawBalanceGauge(view, jump) {
     const ctx = this.ctx;
     const { x, y, gw, gh } = balanceRect(view);
-    const half = INRUN.balanceHalf, e = jump.balanceError;
-    const state = e <= 0 ? GOOD : e < 0.45 ? WARN : BAD;
+    const half = INRUN.balanceHalf;
+    const state = GUIDE_COLOR[guidance(jump).state] ?? IDLE; // sama tila kuin hyppääjän väreissä
 
     this.gaugeFrame(x, y, gw, gh, state, 'KYYKKY', jump);
 
@@ -290,11 +311,10 @@ export class Hud {
     const ctx = this.ctx;
     const { x, y, gw, gh } = gaugeRect(view);
     const range = BAND.range;
-    const err = jump.aoa - FLIGHT.aoaOpt; // + = kärjet ylempänä
+    const err = jump.aoa - jump.aoaOpt; // + = kärjet ylempänä
     const c = jump.bandCenter, half = jump.bandHalf;
-    const e = jump.bandError;
-    // Mittarin väri virheen mukaan: vihreä -> keltainen -> punainen
-    const state = jump.landPrep ? '#9db4c8' : e <= 0 ? GOOD : e < 0.45 ? WARN : BAD;
+    // Mittarin väri virheen mukaan: vihreä -> keltainen -> punainen (sama tila kuin hyppääjän väreissä)
+    const state = GUIDE_COLOR[guidance(jump).state] ?? IDLE;
 
     // Puuskassa koko mittari värisee
     const alert = wind.gustAlert || 0;
@@ -321,7 +341,7 @@ export class Hud {
     ctx.beginPath();
     ctx.moveTo(x + gw + 2, ny); ctx.lineTo(x + gw + 14, ny - 7); ctx.lineTo(x + gw + 14, ny + 7);
     ctx.fill();
-    ctx.fillStyle = jump.landPrep ? '#9db4c8' : '#ffffff';
+    ctx.fillStyle = jump.landPrep ? IDLE : '#ffffff';
     ctx.fillRect(x - 2, ny - 1.5, gw + 4, 3);
     ctx.restore();
   }
@@ -348,15 +368,18 @@ export class Hud {
         break;
       case Phase.FLIGHT:
         // Leveässä näkymässä mittari on keskellä: viestit sen alle
-        if (isWide(view) && jump.t > GAUGE_SHOW) { const g = gaugeRect(view); y = g.y + g.gh + 36; }
+        if (isWide(view) && jump.t > GAUGE_SHOW && this.gauges !== 'off') {
+          const g = gaugeRect(view);
+          y = g.y - 22 + (g.gh + 34) * (this.gauges === 'small' ? SMALL_SCALE : 1) + 24;
+        }
         if (jump.t < 1.3) ({ text, color } = takeoffLabel(jump));
         else if (!jump.landPrep && timeToGround(jump) < 0.55) { text = 'ALASTULO!'; color = GOOD; size = 22; }
         else if (jump.danger > 0.2) {
-          text = jump.aoa > FLIGHT.aoaOpt + jump.bandCenter ? '▼ KAATUMISVAARA!' : '▲ KAATUMISVAARA!';
+          text = jump.aoa > jump.aoaOpt + jump.bandCenter ? '▼ KAATUMISVAARA!' : '▲ KAATUMISVAARA!';
           color = BAD; size = 22;
         }
         else if (!jump.landPrep) {
-          const err = jump.aoa - FLIGHT.aoaOpt - jump.bandCenter;
+          const err = jump.aoa - jump.aoaOpt - jump.bandCenter;
           if (err > jump.bandHalf + 1 * DEG) { text = '▼ nojaa eteen'; color = WARN; }
           else if (err < -jump.bandHalf) { text = '▲ nojaa taakse'; color = BAD; }
         }

@@ -33,7 +33,7 @@ export function runJump(hill, wind, opts = {}, seed = 1) {
       flightTime = jump.t;
       maxHeight = Math.max(maxHeight, jump.height);
       if (typeof steer === 'number') input.lean = jump.t > FLIGHT.entryTime ? steer : 0;
-      else if (steer) input.lean = Math.max(-1, Math.min(1, (jump.aoa - FLIGHT.aoaOpt - jump.bandCenter) / (4 * DEG)));
+      else if (steer) input.lean = Math.max(-1, Math.min(1, (jump.aoa - jump.aoaOpt - jump.bandCenter) / (4 * DEG)));
       if (landLead !== null && !landed && jump.t > FLIGHT.landArmTime) {
         // arvio ajasta maahan: korkeus / lähestymisnopeus rinnettä kohti
         const slope = hill.slopeAtX(jump.x);
