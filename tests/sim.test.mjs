@@ -376,7 +376,9 @@ test('tavoitteet: viivat ja erot lasketaan tulostaulusta', () => {
   assert.ok(lines[1].d < lines[2].d && lines[2].d <= hill.hs + 16);
   assert.match(rivalGap(top, 'Minä', 131), /^Sijaan 2 \(Pena\) on matkaa 9,2 p\.$/);
   assert.match(rivalGap(top, 'Minä', 141), /^Kärkeen \(Aino\) on matkaa 9,0 p\.$/);
-  assert.equal(rivalGap(top, 'Minä', 151), 'Johdat tulostaulua.');
+  assert.equal(rivalGap(top, 'Aino', 150), 'Johdat tulostaulua.');
+  // Vanhentunut taulu (oma parannus ei vielä näy siinä) ei riitä johtamisen väittämiseen
+  assert.equal(rivalGap(top, 'Minä', 151), '');
   assert.equal(rivalGap(null, 'Minä', 100), '');
   // Ilman tulostaulua jää vain oma ennätys, ilman ennätystä ei mitään
   assert.deepEqual(hillTargets(hill, { distance: 110, total: 90 }, null, null).map((l) => l.kind), ['own']);

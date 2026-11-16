@@ -23,7 +23,6 @@ const CRASH_DELAY = 16;     // vauhtimäessä tai ilmassa kaatunut kierii alas e
 const CRASH_SKIP = 2;       // tämän jälkeen painallus ohittaa kierimisen (s)
 const AGAIN_GUARD = 0.7;    // estää vahinkopainalluksen ohittamasta tuloksia (s)
 const TABLOID_GUARD = 1.2;  // Iltapulun etusivun saa suljettua vasta tämän jälkeen (s)
-const BOARD_MAX_AGE = 120;  // tulostaulun kilpailijat haetaan uudelleen, kun tiedot ovat tätä vanhempia (s)
 
 const canvas = document.getElementById('game');
 const hill = createHill(HILLS.tuulivaara);
@@ -42,7 +41,6 @@ let acc = 0;
 let last = 0;
 let nameProblem = null;   // virheteksti, jos palvelin hylkäsi nimen – kysytään uusi ennen seuraavaa lähetystä
 let board = null;         // tulostaulun rivit tavoiteviivoja ja eroja varten (null = ei haettu)
-let boardAt = -Infinity;  // milloin haettu (s)
 // Haamuhyppääjä: 'own' = oma kauden pituusennätys, 'leader' = tulostaulun kärki, 'off' = ei haamua
 const GHOST_MODES = lb.enabled ? ['own', 'leader', 'off'] : ['own', 'off'];
 // Oletuksena kärki, kun tulostaulu on käytössä; oma valinta säilyy laitteella
@@ -63,15 +61,18 @@ function updateTargets() {
   scene.ghostName = leader?.name ?? null;
 }
 
-/** Hakee tulostaulun taustalla. Epäonnistuminen ei haittaa: vanhat tiedot jäävät voimaan. */
+/**
+ * Hakee tulostaulun. Epäonnistuminen ei haittaa: vanhat tiedot jäävät voimaan.
+ * Palauttaa true, jos taulu on nyt tuore.
+ */
 async function refreshBoard() {
-  if (!lb.enabled) return;
-  boardAt = performance.now() / 1000;
+  if (!lb.enabled) return false;
   try {
     board = (await lb.fetchTop(hill.def.id)).top;
-    updateTargets();
-    await refreshLeaderGhost();
-  } catch { /* ei yhteyttä */ }
+  } catch { return false; /* ei yhteyttä */ }
+  updateTargets();
+  refreshLeaderGhost(); // rata on iso: sitä ei jäädä odottamaan
+  return true;
 }
 
 /** Hakee kärjen radan, jos se on vaihtunut. Rata on iso, joten sitä ei haeta turhaan. */
@@ -91,8 +92,9 @@ async function refreshLeaderGhost() {
   updateTargets();
 }
 
-/** Tulospaneelin rivi: matka lähimpään edellä olevaan. */
-const gapText = () => rivalGap(board, lb.playerName(), getBest(hill.def.id)?.total ?? 0);
+/** Tulospaneelin rivi: matka lähimpään edellä olevaan. Vertailussa on taululla oleva tulos, ei laitteen oma ennätys. */
+const gapText = () => rivalGap(board, lb.playerName(),
+  lb.onlineTotal(hill.def.id) ?? getBest(hill.def.id)?.total ?? 0);
 
 function resize() {
   const w = window.innerWidth, h = window.innerHeight;
@@ -118,7 +120,6 @@ function finishJump(now) {
   }, jump.track);
   ui.showResult(jump.result, record, analyzeJump(hill, jump));
   updateTargets();
-  if (now - boardAt > BOARD_MAX_AGE) refreshBoard();
   if (jump.result.outcome === 'fall') {
     // Kaatumisesta kertoo ensin Iltapulun etusivu; tulokset odottavat sen alla
     if (!scene.photoTaken) takePhoto();
@@ -160,14 +161,20 @@ async function start() {
 async function submitOnline(result, ghost) {
   const showing = () => mode === 'result' && jump.result === result;
   ui.setOnline('');
-  if (!lb.enabled || !lb.playerName() || result.total <= 0) return; // nollatulosta ei lähetetä
+  if (!lb.enabled) return;
+  // Taulu haetaan jokaisen hypyn jälkeen, jotta kilpailijoiden uudet tulokset näkyvät heti
+  if (!lb.playerName() || result.total <= 0) { refreshBoard(); return; } // nollatulosta ei lähetetä
   for (;;) {
     if (nameProblem) {
       if (!showing()) return;
       lb.setPlayerName(await ui.askName(lb.nameError, { error: nameProblem, value: lb.playerName() }));
       nameProblem = null;
     }
-    if (!lb.shouldSubmit(hill.def.id, result)) { ui.setOnline(gapText()); return; }
+    if (!lb.shouldSubmit(hill.def.id, result)) {
+      // Ero lasketaan vasta tuoreesta taulusta: vanhasta voisi puuttua juuri ohi mennyt kilpailija
+      if (await refreshBoard() && showing()) ui.setOnline(gapText());
+      return;
+    }
     ui.setOnline('Lähetetään tulosta…');
     const res = await lb.submitScore(hill.def.id, result, ghost);
     if (res.reason === 'name_taken' || res.reason === 'bad_name') {
@@ -179,8 +186,8 @@ async function submitOnline(result, ghost) {
     if (!showing()) return;
     if (res.ok) {
       const rank = res.improved ? `Tulostaulussa sijalla ${res.rank}.` : `Sijasi tulostaulussa: ${res.rank}.`;
-      ui.setOnline(`${rank} ${gapText()}`.trim(), res.improved);
-      if (res.improved) refreshBoard();
+      ui.setOnline(rank, res.improved);
+      if (await refreshBoard() && showing()) ui.setOnline(`${rank} ${gapText()}`.trim(), res.improved);
     }
     else if (res.reason === 'offline') ui.setOnline('Ei yhteyttä – tulosta ei lähetetty tulostauluun.');
     else if (res.reason === 'season') ui.setOnline('Peli on päivittynyt – lataa sivu uudelleen, niin tulokset tallentuvat.');

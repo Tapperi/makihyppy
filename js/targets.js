@@ -53,7 +53,8 @@ export function hillTargets(hill, best, top, myName) {
 export function rivalGap(top, myName, myTotal) {
   if (!top?.length) return '';
   const { next } = findRivals(top, myName, myTotal);
-  if (!next) return top.some((e) => e.name === myName) ? 'Johdat tulostaulua.' : '';
+  // Johtaa vain se, joka on taulun ensimmäisellä rivillä – ei riitä, että nimi löytyy taululta
+  if (!next) return top[0].name === myName ? 'Johdat tulostaulua.' : '';
   const gap = fmt(Math.max(0.1, next.total - myTotal));
   return next.rank === 1
     ? `Kärkeen (${next.name}) on matkaa ${gap} p.`

@@ -50,7 +50,8 @@ export function setPlayerName(raw) {
 }
 
 async function request(path, options) {
-  const res = await fetch(API + path, { ...options, signal: AbortSignal.timeout(TIMEOUT) });
+  // no-store: selaimen välimuisti ei saa palauttaa vanhaa taulua heti oman tuloksen lähetyksen jälkeen
+  const res = await fetch(API + path, { cache: 'no-store', ...options, signal: AbortSignal.timeout(TIMEOUT) });
   const body = await res.json().catch(() => ({}));
   return { status: res.status, body };
 }
@@ -60,6 +61,12 @@ export function shouldSubmit(hillId, result) {
   if (!enabled || !getPlayer()) return false;
   const best = getOnlineBest(hillId);
   return !best || best.name !== getPlayer().name || result.total > best.total;
+}
+
+/** Palvelimen vahvistama paras pistemäärä nykyisellä nimellä, tai null jos tulosta ei ole taululla. */
+export function onlineTotal(hillId) {
+  const best = getOnlineBest(hillId);
+  return best && best.name === getPlayer()?.name ? best.total : null;
 }
 
 /**
