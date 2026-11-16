@@ -165,7 +165,7 @@ test('tuuli elää ja voi tyyntyä, mutta suunta ei käänny kesken kauden', () 
   assert.ok(head > 10 && head < 28, `vastatuulikausia ${head}/30`);
 });
 
-test('nykyinen kausi: kohtalainen vastatuuli, joka välillä tyyntyy mutta ei käänny myötäiseksi', () => {
+test('nykyinen kausi: kova vastatuuli, joka välillä hellittää mutta ei käänny myötäiseksi', () => {
   assert.equal(PATTERN.dir, 1);
   let lo = Infinity, hi = -Infinity, sum = 0, n = 0;
   for (let seed = 1; seed <= 20; seed++) {
@@ -177,9 +177,9 @@ test('nykyinen kausi: kohtalainen vastatuuli, joka välillä tyyntyy mutta ei k�
   }
   console.log(`      tuuli ${lo.toFixed(1)}..${hi.toFixed(1)} m/s, keskiarvo ${(sum / n).toFixed(2)} m/s`);
   assert.ok(lo >= 0, 'ei koskaan myötätuulta');
-  assert.ok(lo < 0.3, `välillä tyyntyy (${lo})`);
-  assert.ok(hi > 2.8 && hi <= WIND.max);
-  assert.ok(sum / n > 1.3 && sum / n < 2.3, `keskiarvo ${sum / n}`);
+  assert.ok(lo < 1.2, `välillä hellittää (${lo})`);
+  assert.ok(hi > 3.5 && hi <= WIND.max);
+  assert.ok(sum / n > 2.3 && sum / n < 3.3, `keskiarvo ${sum / n}`);
 });
 
 test('kauden tuulikuvio: sama siemen = sama kuvio, eri kausi = eri kuvio, silmukka on saumaton', () => {

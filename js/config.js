@@ -166,6 +166,7 @@ export const WIND = {
   // Käsin valitut kaudet: {dir: 1 vasta / -1 myötä, strength}. Muut arvotaan kauden siemenestä.
   seasons: {
     3: { dir: 1, strength: 1.8 },   // kohtalainen vastatuuli
+    4: { dir: 1, strength: 2.8 },   // kova vastatuuli
   },
   // Hyppykohtainen vaihtelu
   gustSigma: 0.2, gustRate: 0.8,   // sileä kohina (hajonta ~ sigma / sqrt(2 × rate) = 0,16 m/s)
@@ -202,7 +203,7 @@ export const BAND = {
  * ole vertailukelpoisia – myös worker/src/index.js:n SEASON. Uusi kausi alkaa tyhjältä
  * taululta; kausien nimet ovat workerissa.
  */
-export const SEASON = 3;
+export const SEASON = 4;
 
 export const LEADERBOARD = {
   url: 'https://tuulimaki-scores.tapperi.workers.dev', // näkyy `wrangler deploy` -komennon tulosteessa

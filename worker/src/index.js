@@ -18,7 +18,7 @@ const HILLS = {
  * vertailukelpoisia: kasvata SEASON-arvoa täällä ja pelin js/config.js:ssä. Uusi kausi
  * alkaa tyhjältä taululta, vanhat kaudet jäävät näkyviin. Nimet otetaan järjestyksessä.
  */
-const SEASON = 3;
+const SEASON = 4;
 const SEASON_NAMES = [
   'Murtumaraja',
   'Kriittinen Piste',
