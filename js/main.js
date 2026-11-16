@@ -45,8 +45,10 @@ let board = null;         // tulostaulun rivit tavoiteviivoja ja eroja varten (n
 let boardAt = -Infinity;  // milloin haettu (s)
 // Haamuhyppääjä: 'own' = oma kauden pituusennätys, 'leader' = tulostaulun kärki, 'off' = ei haamua
 const GHOST_MODES = lb.enabled ? ['own', 'leader', 'off'] : ['own', 'off'];
-let ghostMode = getSetting('ghost', 'own');
-if (!GHOST_MODES.includes(ghostMode)) ghostMode = ghostMode === false ? 'off' : 'own';
+// Oletuksena kärki, kun tulostaulu on käytössä; oma valinta säilyy laitteella
+const GHOST_DEFAULT = lb.enabled ? 'leader' : 'own';
+let ghostMode = getSetting('ghost', GHOST_DEFAULT);
+if (!GHOST_MODES.includes(ghostMode)) ghostMode = ghostMode === false ? 'off' : GHOST_DEFAULT;
 let leaderGhost = null;   // kärjen rata {key, name, track} tai null (ei haettu tai kenelläkään ei ole rataa)
 
 /** Päivittää rinteen tavoiteviivat, väliaikojen vertailuhypyn ja haamuhyppääjän. */
