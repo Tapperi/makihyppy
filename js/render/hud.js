@@ -1,7 +1,7 @@
 // Pelinaikainen HUD canvasille: tuuli, nopeus, ponnistuspalkki, asentomittari, viestit.
 
 import { Phase } from '../jump.js';
-import { INRUN, TAKEOFF, FLIGHT, WIND, BAND, CRASH, DEG } from '../config.js';
+import { INRUN, TAKEOFF, FLIGHT, WIND, BAND, CRASH, DEG, SPLITS } from '../config.js';
 import { takeoffQuality, lateTakeoffQuality } from '../physics.js';
 import { clamp } from '../util.js';
 import { guidance, qualityColor, GUIDE_COLOR, DANGER_COLOR } from '../guidance.js';
@@ -34,6 +34,7 @@ function panel(ctx, x, y, w, h) {
 const isWide = ({ W, H }) => W > H;
 const BAR_Y = 104;          // ponnistuspalkin yläreuna turva-alueesta (px)
 const GAUGE_SHOW = 0.35;    // asentomittari tulee näkyviin näin pian ponnistuksen jälkeen (s)
+const SPLIT_SHOW = 2.5;     // väliaika näkyy näin kauan (s)
 
 function gaugeRect({ W, H, top }) {
   const gh = Math.min(170, H * 0.24), gw = 16;
@@ -74,6 +75,7 @@ export class Hud {
     this.barGradient = null;
     this.barKey = '';
     this.gauges = GAUGE_MODES[0]; // 'small' | 'full' | 'off'
+    this.ref = null;              // ennätyshypyn väliajat {speed, heights} tai null (main.js asettaa)
   }
 
   /** Piirtää mittarin asetuksen mukaisessa koossa: pienenä se kutistuu kohti pistettä (cx, cy). */
@@ -128,6 +130,7 @@ export class Hud {
     const { top } = view;
     this.drawWind(12, top + 10, wind);
     this.drawInfo(view, jump);
+    this.drawSplit(view, jump);
 
     const inAir = jump.phase === Phase.FLIGHT;
     // Leveässä näkymässä mittari korvaa ponnistuspalkin heti kun se tulee näkyviin
@@ -227,6 +230,34 @@ export class Hud {
     ctx.fillStyle = color;
     ctx.font = `700 20px ${FONT}`;
     ctx.fillText(value, x + pw - 10, y + 41);
+  }
+
+  // --- Väliaika: ero ennätyshyppyyn nokalla ja lennon aikana, vihreä = edellä ---
+  drawSplit({ W, top }, jump) {
+    const ref = this.ref;
+    if (!ref || jump.phase !== Phase.FLIGHT) return;
+    let label = 'NOKKA', delta = (jump.takeoffSpeed - ref.speed) * 3.6, unit = 'km/h', age = jump.t;
+    for (let i = jump.splits.length - 1; i >= 0; i--) {
+      if (ref.heights?.[i] == null) continue;
+      label = `${SPLITS[i]} M`; delta = jump.splits[i].height - ref.heights[i]; unit = 'm'; age = jump.t - jump.splits[i].t;
+      break;
+    }
+    if (age > SPLIT_SHOW) return;
+    // Matala yhden rivin paneeli: mahtuu yläkulman tiedon ja ponnistuspalkin väliin
+    const ctx = this.ctx, pw = Math.min(170, W - 184), ph = 24, x = W - pw - 12, y = top + 70;
+    const even = Math.abs(delta) < 0.05;
+    ctx.globalAlpha = clamp((SPLIT_SHOW - age) / 0.3, 0, 1);
+    panel(ctx, x, y, pw, ph);
+    ctx.textBaseline = 'alphabetic';
+    ctx.textAlign = 'left';
+    ctx.fillStyle = '#9db4c8';
+    ctx.font = `600 10px ${FONT}`;
+    ctx.fillText(`ENN. ${label}`, x + 10, y + 16);
+    ctx.textAlign = 'right';
+    ctx.fillStyle = even ? '#ffffff' : delta > 0 ? GOOD : BAD;
+    ctx.font = `700 14px ${FONT}`;
+    ctx.fillText(`${even ? '±' : delta > 0 ? '+' : '−'}${fmt(Math.abs(delta))} ${unit}`, x + pw - 10, y + 17);
+    ctx.globalAlpha = 1;
   }
 
   // --- Ponnistuksen ajoituspalkki ---

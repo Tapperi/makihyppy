@@ -66,8 +66,9 @@ export function shouldSubmit(hillId, result) {
  * Lähettää tuloksen. Palauttaa
  *   {ok: true, rank, improved, best}
  *   | {ok: false, reason: 'name_taken' | 'bad_name' | 'rate_limited' | 'season' | 'offline' | 'error'}
+ * @param ghost  hypyn rata (ghost.js) tai null: tallentuu tuloksen mukana muiden haamuhyppääjäksi
  */
-export async function submitScore(hillId, result) {
+export async function submitScore(hillId, result, ghost = null) {
   const player = getPlayer();
   try {
     const { status, body } = await request('/score', {
@@ -80,12 +81,15 @@ export async function submitScore(hillId, result) {
         season: SEASON,
         distance: result.distance,
         style: result.style,
+        ...(ghost ? { ghost } : {}),
       }),
     });
     if (status === 200) {
       saveOnlineBest(hillId, { name: player.name, total: body.best.total });
       return { ok: true, rank: body.rank, improved: body.improved, best: body.best };
     }
+    // Vanha palvelinversio ei ota rataa vastaan: tulos lähetetään silloin ilman sitä
+    if (ghost && body.error === 'too_large') return submitScore(hillId, result, null);
     if (status === 409) return { ok: false, reason: 'name_taken' };
     if (status === 429) return { ok: false, reason: 'rate_limited' };
     if (body.error === 'bad_name') return { ok: false, reason: 'bad_name' };
@@ -97,12 +101,23 @@ export async function submitScore(hillId, result) {
 }
 
 /**
- * Kauden 50 parasta: {season, seasonName, currentSeason, top: [{name, distance, style, total, at}]}.
+ * Kauden 50 parasta: {season, seasonName, currentSeason, top: [{name, distance, style, total, at, ghost}]}.
+ * ghost = 1, jos tuloksella on haamuhyppääjän rata.
  * season puuttuu = nykyinen kausi. Heittää virheen, jos haku ei onnistu.
  */
 export async function fetchTop(hillId, season) {
   const q = `/top?hill=${encodeURIComponent(hillId)}` + (season ? `&season=${season}` : '');
   const { status, body } = await request(q);
+  if (status !== 200) throw new Error(body.error || `HTTP ${status}`);
+  return body;
+}
+
+/**
+ * Haamuhyppääjä: nykyisen kauden parhaan radallisen tuloksen {name, distance, total, at, ghost}.
+ * ghost on null, jos kenelläkään ei vielä ole rataa. Heittää virheen, jos haku ei onnistu.
+ */
+export async function fetchGhost(hillId) {
+  const { status, body } = await request(`/ghost?hill=${encodeURIComponent(hillId)}`);
   if (status !== 200) throw new Error(body.error || `HTTP ${status}`);
   return body;
 }

@@ -78,6 +78,10 @@ tulostaulu on päällä vain, kun `js/config.js`:n `LEADERBOARD.url` on asetettu
 - `POST /score` `{name, deviceId, hill, season, distance, style}` – palvelin laskee kokonaispisteet itse
   ja säilyttää vain pelaajan parhaan tuloksen per kausi. Vastaus: `{best, rank, improved}`.
 - `GET /top?hill=tuulivaara&season=1` – kauden 50 parasta kokonaispisteiden mukaan (ilman `season`-arvoa nykyinen kausi).
+- Haamuhyppääjä: `POST /score` ottaa mukaan hypyn radan (`ghost`, ks. `js/ghost.js`), joka tallentuu parhaan tuloksen
+  rinnalle (`scores.ghost`). `GET /ghost?hill=tuulivaara` palauttaa nykyisen kauden parhaan radallisen tuloksen
+  `{name, distance, total, at, ghost}`. Palvelin tarkistaa radan muodon ja arvot (`worker/src/ghost.js`), mutta ei voi
+  todentaa, että rata vastaa tulosta. Kelvoton rata ei hylkää tulosta, se jää vain ilman haamua.
 - Kaudet: kun fysiikka muuttuu niin, etteivät vanhat tulokset ole vertailukelpoisia, kasvata `SEASON`-arvoa
   sekä `js/config.js`:ssä että `worker/src/index.js`:ssä ja aja `npx wrangler deploy`. Uusi kausi alkaa tyhjältä
   taululta, vanhat kaudet voi selata tulostaulun nuolilla. Kausien nimet ovat `worker/src/index.js`:n

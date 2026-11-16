@@ -23,7 +23,7 @@ function write(data) {
   } catch { /* yksityinen selaus tms. – peli toimii silti */ }
 }
 
-/** Mäkikohtainen ennätys tällä kaudella: {distance, total} tai null. */
+/** Mäkikohtainen ennätys tällä kaudella: {distance, total, splits, ghost} tai null. */
 export function getBest(hillId) {
   return seasonData(read()).best?.[hillId] ?? null;
 }
@@ -61,8 +61,12 @@ export function saveOnlineBest(hillId, best) {
   write(data);
 }
 
-/** Päivittää ennätykset. Palauttaa {distanceRecord, pointsRecord}. */
-export function recordJump(hillId, result) {
+/**
+ * Päivittää ennätykset. Palauttaa {distanceRecord, pointsRecord, best}.
+ * @param splits  hypyn väliajat {speed, heights}: tallennetaan pituusennätyksen mukana vertailua varten
+ * @param ghost   hypyn rata (ghost.js): tallennetaan pituusennätyksen mukana haamuhyppääjää varten
+ */
+export function recordJump(hillId, result, splits, ghost) {
   const data = read();
   const best = (seasonData(data).best ??= {});
   const prev = best[hillId] ?? { distance: 0, total: 0 };
@@ -72,6 +76,8 @@ export function recordJump(hillId, result) {
   best[hillId] = {
     distance: distanceRecord ? result.distance : prev.distance,
     total: pointsRecord ? result.total : prev.total,
+    splits: distanceRecord ? splits : prev.splits,
+    ghost: distanceRecord ? ghost : prev.ghost,
   };
   write(data);
   return { distanceRecord, pointsRecord, best: best[hillId] };

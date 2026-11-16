@@ -2,7 +2,7 @@
 // Strategia: verkko ensin (uusin versio aina kun yhteys on), välimuisti varalla.
 // Kasvata VERSION-arvoa, kun tiedostolista muuttuu.
 
-const VERSION = 'tuulimaki-v7';
+const VERSION = 'tuulimaki-v8';
 const ASSETS = [
   './',
   'index.html',
@@ -22,6 +22,9 @@ const ASSETS = [
   'js/leaderboard.js',
   'js/ui.js',
   'js/tabloid.js',
+  'js/targets.js',
+  'js/analysis.js',
+  'js/ghost.js',
   'js/render/scene.js',
   'js/render/jumper.js',
   'js/render/hud.js',

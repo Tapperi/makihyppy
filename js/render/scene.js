@@ -7,6 +7,7 @@ import { JumperSprite, COLORS } from './jumper.js';
 import { TAKEOFF } from '../config.js';
 import { takeoffQuality } from '../physics.js';
 import { guidance, takeoffFlash, GUIDE_COLOR, DANGER_COLOR } from '../guidance.js';
+import { GHOST, sampleTrack } from '../ghost.js';
 
 const VIEW_METERS = 22;     // ruudun lyhyemmälle sivulle mahtuva matka
 const JUMPER_SCALE = 1.5;  // hyppääjä piirretään hieman luonnollista suurempana
@@ -20,8 +21,10 @@ const CAM_OFFSET = {
   [Phase.DONE]: [0, 1],
 };
 
+const GHOST_REACH = 2.2;    // haamun piirtoalueen puolikas hahmon mitoissa (m): sukset ja pää mahtuvat joka asennossa
 const SKI_LENGTH = 2.45;    // irronneen suksen pituus (m)
 const BODY_WOBBLE = 0.35;   // asentovirheen osuus vartalon huojunnasta: suunnan näyttää asento (guidance.js)
+const TARGET_COLOR = { own: '#12924a', next: '#7a4fd0', leader: '#b97a00' };
 const STREAK_RGB = { good: '235, 246, 255', sweet: '235, 246, 255', warn: '255, 226, 120', bad: '255, 150, 130' };
 
 export class Scene {
@@ -57,6 +60,14 @@ export class Scene {
     this.photoBest = 0;
     this.photoDue = false;
     this.photoTaken = false;
+    this.targets = [];     // tavoiteviivat rinteessä [{d, kind, label}] (targets.js, main.js asettaa)
+    // Haamuhyppääjä: ennätyshypyn nauha (ghost.js, main.js asettaa) tai null
+    this.ghost = null;
+    this.ghostName = null; // tulostaulun kärjen haamulle nimilappu; omalla ennätyksellä null
+    this.run = { ghost: null, name: null }; // käynnissä olevan hypyn haamu: ei vaihdu kesken hypyn
+    this.ghostNow = null;  // haamun tila tällä hetkellä {x, y, pitch, pose, alpha} tai null
+    this.ghostSprite = new JumperSprite();
+    this.ghostLayer = null; // apukangas: hahmo piirretään ensin tänne, jotta läpinäkyvyys on tasainen
     this.buildStatic();
   }
 
@@ -122,6 +133,9 @@ export class Scene {
     const [ox, oy] = CAM_OFFSET[jump.phase];
     Object.assign(this.cam, { ox, oy, x: jump.x + ox, y: jump.y + oy, vx: 0, vy: 0 });
     this.sprite.snap(jump.pose);
+    this.ghostSprite.snap('crouch');
+    this.run = { ghost: this.ghost, name: this.ghostName };
+    this.ghostNow = null;
     this.particles.length = 0;
     this.streaks.length = 0;
     this.wobble = 0; this.shx = 0; this.shy = 0;
@@ -158,6 +172,9 @@ export class Scene {
     this.guide = guidance(jump);
     this.danger = jump.danger;
     this.sprite.update(dt, jump.pose, energy, this.guide.lean);
+    // Haamu lähtee puomilta samalla hetkellä kuin pelaaja ja kulkee oman nauhansa mukaan
+    this.ghostNow = this.run.ghost && jump.phase !== Phase.READY ? sampleTrack(this.run.ghost, jump.runT) : null;
+    if (this.ghostNow) this.ghostSprite.update(dt, this.ghostNow.pose);
     this.updateWobble(jump, wind, dt);
     this.updateStreaks(jump, wind, dt);
     this.updateCrashFx(jump, dt);
@@ -399,6 +416,7 @@ export class Scene {
     this.drawTerrain(ctx);
     this.drawInrun(ctx);
     this.drawMarks(ctx, jump);
+    this.drawGhost(ctx);
     this.drawJumper(ctx, jump);
     this.drawDebris(ctx);
     this.drawStreaks(ctx, jump, wind);
@@ -667,6 +685,20 @@ export class Scene {
     [lx, ly] = tick(this.hsMark, 2, '#1d3557', 3.5);
     ctx.fillStyle = '#1d3557'; ctx.fillText(`HS ${this.hill.hs}`, lx, ly);
 
+    // Tavoiteviivat: oma ennätys ja tulostaulun kilpailijat. Lippu pinnalla, nimi syvemmällä kuin metriluvut.
+    const targets = [...this.targets].sort((a, b) => a.d - b.d);
+    targets.forEach((t, i) => {
+      const pos = this.hill.landingPos(t.d), X = this.sx(pos.x), Y = this.sy(pos.y);
+      if (X < -160 || X > this.W + 160) return;
+      const color = TARGET_COLOR[t.kind];
+      const [tx, ty] = tick(pos, 3.3 + i * 1.3, color, 3);
+      ctx.fillStyle = color;
+      ctx.fillText(t.label, tx, ty);
+      ctx.beginPath();
+      ctx.moveTo(X, Y); ctx.lineTo(X, Y - sc * 1.5); ctx.lineTo(X + sc * 0.8, Y - sc * 1.15); ctx.lineTo(X, Y - sc * 0.8);
+      ctx.fill();
+    });
+
     // Alastulokohdan merkki
     if (jump.touchdown) {
       const X = this.sx(jump.touchdown.x), Y = this.sy(jump.touchdown.y);
@@ -675,6 +707,40 @@ export class Scene {
       ctx.moveTo(X, Y); ctx.lineTo(X - sc * 0.45, Y - sc * 1.3); ctx.lineTo(X + sc * 0.45, Y - sc * 1.3);
       ctx.fill();
     }
+  }
+
+  // --- Haamuhyppääjä: kauden ennätyshyppy puoliläpinäkyvänä pelaajan takana ---
+  drawGhost(ctx) {
+    const g = this.ghostNow;
+    if (!g || this.photoDue) return; // lehtikuvaan ei haamua
+    const js = this.scale * JUMPER_SCALE, half = GHOST_REACH * js;
+    const X = this.sx(g.x), Y = this.sy(g.y);
+    if (X < -half || X > this.W + half || Y < -half || Y > this.H + half) return;
+    // Hahmon osat menevät päällekkäin, joten suoraan läpinäkyvänä piirrettynä nivelet näkyisivät tummempina
+    const layer = (this.ghostLayer ??= document.createElement('canvas'));
+    const px = Math.ceil(half * 2 * this.dpr);
+    if (layer.width !== px) { layer.width = px; layer.height = px; }
+    const lc = layer.getContext('2d');
+    lc.setTransform(1, 0, 0, 1, 0, 0);
+    lc.clearRect(0, 0, px, px);
+    lc.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
+    this.ghostSprite.draw(lc, half, half, js, g.pitch);
+    ctx.globalAlpha = GHOST.alpha * g.alpha;
+    ctx.drawImage(layer, X - half, Y - half, half * 2, half * 2);
+    if (this.run.name) {
+      // Nimilappu kertoo, kenen hyppy vieressä kulkee
+      const up = g.pose === 'crouch' || g.pose === 'flight' ? 1.3 : 2.3; // pystyasennossa pään yläpuolelle
+      ctx.globalAlpha = Math.min(1, GHOST.alpha * 1.8) * g.alpha;
+      ctx.font = `700 ${Math.max(11, Math.round(this.scale * 0.8))}px system-ui, sans-serif`;
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'alphabetic';
+      ctx.lineWidth = 3;
+      ctx.strokeStyle = '#ffffff';
+      ctx.fillStyle = '#1d3557';
+      ctx.strokeText(this.run.name, X, Y - up * js);
+      ctx.fillText(this.run.name, X, Y - up * js);
+    }
+    ctx.globalAlpha = 1;
   }
 
   drawJumper(ctx, jump) {

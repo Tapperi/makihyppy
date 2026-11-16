@@ -2,7 +2,9 @@
 //   node tests/sim.test.mjs
 
 import assert from 'node:assert/strict';
-import { HILLS, WIND, STEP, BAND, DEG, INRUN, FLIGHT, CRASH, SEASON, GATE_TIME } from '../js/config.js';
+import { HILLS, WIND, STEP, BAND, DEG, INRUN, FLIGHT, CRASH, SEASON, GATE_TIME, SPLITS } from '../js/config.js';
+import { analyzeJump } from '../js/analysis.js';
+import { distanceFor, findRivals, hillTargets, rivalGap, TARGET_JUDGE } from '../js/targets.js';
 import { Phase } from '../js/jump.js';
 import { guidance } from '../js/guidance.js';
 import { createHill } from '../js/hill.js';
@@ -11,6 +13,8 @@ import { distancePoints, scoreJump } from '../js/scoring.js';
 import { posturePerf, inrunAccel } from '../js/physics.js';
 import { makeRng } from '../js/util.js';
 import { runJump, fixedWind } from './bot.js';
+import { GHOST, validTrack, sampleTrack } from '../js/ghost.js';
+import { cleanGhost } from '../worker/src/ghost.js';
 
 const hill = createHill(HILLS.tuulivaara);
 const SEED = seasonSeed(SEASON, hill.def.id);
@@ -275,6 +279,110 @@ test('ohjaussignaali: suunta, tila ja vakavuus vastaavat mittaria', () => {
   assert.equal(flight(half + 2 * DEG, { posture: 0 }).lean, 0, 'ei signaalia ennen lentoasentoa');
   assert.equal(flight(0, { landPrep: true }).active, false, 'alastuloon valmistautuessa ei signaalia');
   assert.equal(guidance({ phase: Phase.SLIDE }).active, false);
+});
+
+test('jälkianalyysi: virheiden hinta metreinä vastaa hyppyjen todellista eroa', () => {
+  const run = (opts) => runJump(hill, fixedWind(1), opts);
+  const clean = run({}), cleanCost = analyzeJump(hill, clean.jump);
+  assert.equal(cleanCost.takeoff, 0);
+  assert.equal(cleanCost.speed, 0);
+  assert.ok(Math.abs(cleanCost.flight) <= 1.5, `siisti liito ${cleanCost.flight}`);
+
+  const early = run({ takeoffAt: 3.4 }), earlyCost = analyzeJump(hill, early.jump);
+  const realLoss = clean.result.distance - early.result.distance;
+  assert.ok(Math.abs(earlyCost.takeoff - realLoss) <= 2, `ponnistus ${earlyCost.takeoff} vs todellinen ${realLoss}`);
+  assert.equal(earlyCost.speed, 0);
+
+  const poor = run({ balance: 0.6 }), poorCost = analyzeJump(hill, poor.jump);
+  const speedLoss = clean.result.distance - poor.result.distance;
+  assert.ok(Math.abs(poorCost.speed - speedLoss) <= 2, `kyykky ${poorCost.speed} vs todellinen ${speedLoss}`);
+  assert.ok(Math.abs(poorCost.kmh - (clean.jump.takeoffSpeed - poor.jump.takeoffSpeed) * 3.6) < 0.15, `km/h ${poorCost.kmh}`);
+
+  const lazy = run({ steer: false }), lazyCost = analyzeJump(hill, lazy.jump);
+  assert.ok(lazyCost.flight > 10, `ohjaamaton liito ${lazyCost.flight}`);
+  assert.equal(analyzeJump(hill, runJump(hill, fixedWind(0), { balance: false }, 1).jump), null, 'vauhtimäessä kaatunut');
+});
+
+test('väliajat: lentokorkeus tallentuu väliaikapisteissä', () => {
+  const { jump } = runJump(hill, fixedWind(0));
+  assert.equal(jump.splits.length, SPLITS.length);
+  for (const s of jump.splits) assert.ok(s.height > 1 && s.height < 9 && s.t > 0, `korkeus ${s.height}`);
+  assert.ok(jump.splits[1].t > jump.splits[0].t);
+  assert.equal(runJump(hill, fixedWind(0), { steer: 1, landLead: null }).jump.splits.length < SPLITS.length, true, 'lyhyt hyppy ei yllä kaikkiin');
+});
+
+test('haamu: hypyn rata nauhoittuu ja toistuu samana', () => {
+  const { jump } = runJump(hill, fixedWind(0));
+  const track = JSON.parse(JSON.stringify(jump.track)); // sama muoto kuin tallennuksesta luettuna
+  assert.ok(validTrack(track));
+  assert.ok(!validTrack(null) && !validTrack({ dt: 1 / 30, x: [1], y: [1], a: [0], p: [0] }), 'tyhjä tai katkennut nauha');
+  assert.ok(JSON.stringify(track).length < 12000, `nauhan koko ${JSON.stringify(track).length}`);
+  // Alku puomilla kyykyssä, loppu rinteessä hieman alastulon jälkeen
+  const gate = hill.inrunPos(hill.inrunLength), start = sampleTrack(track, 0);
+  assert.ok(Math.hypot(start.x - gate.x, start.y - gate.y) < 0.05 && start.pose === 'crouch');
+  const n = track.x.length, end = (n - 1) * track.dt;
+  assert.ok(track.x[n - 1] > jump.touchdown.x && track.x[n - 1] < jump.touchdown.x + 60, 'nauha päättyy alastulon jälkeen');
+  assert.equal(sampleTrack(track, end), null);
+  assert.equal(sampleTrack(track, -0.1), null);
+  // Haamu on alastulohetkellä alastulopaikassa ja häipyy nauhan lopussa
+  const flightStart = track.p.indexOf(2) * track.dt;
+  const landT = track.p.findIndex((p) => p === 4 || p === 5) * track.dt;
+  assert.ok(flightStart > 3 && landT > flightStart + 2, `lento ${flightStart}..${landT}`);
+  const land = sampleTrack(track, landT);
+  assert.ok(Math.abs(land.x - jump.touchdown.x) < 1.5, `alastulo ${land.x} vs ${jump.touchdown.x}`);
+  assert.equal(sampleTrack(track, landT - 1).pose, 'flight');
+  assert.equal(sampleTrack(track, landT - 1).alpha, 1);
+  assert.ok(sampleTrack(track, end - GHOST.fade / 2).alpha < 0.6);
+  // Kello käy alastulon jälkeenkin, jotta haamu ehtii perille vaikka pelaaja jäisi lyhyeksi
+  assert.ok(jump.runT > end);
+  // Kaatuneen hypyn nauha päättyy kaatumiseen
+  const crashed = runJump(hill, fixedWind(0), { balance: false }, 1).jump;
+  assert.ok(crashed.track.x.length * crashed.track.dt < crashed.runT - 1);
+});
+
+test('haamu: palvelin hyväksyy pelin nauhan ja hylkää rikkinäisen', () => {
+  const { jump } = runJump(hill, fixedWind(2));
+  const stored = cleanGhost(JSON.parse(JSON.stringify(jump.track)));
+  assert.ok(stored && stored.length < 24 * 1024 - 300, `tallennettu koko ${stored?.length}`);
+  assert.deepEqual(JSON.parse(stored), jump.track, 'rata säilyy muuttumattomana');
+  assert.ok(validTrack(JSON.parse(stored)));
+  const broken = (change) => { const t = JSON.parse(stored); change(t); return cleanGhost(t); };
+  assert.equal(cleanGhost(null), null);
+  assert.equal(cleanGhost('x'), null);
+  assert.equal(broken((t) => { t.dt = 5; }), null, 'aika-askel');
+  assert.equal(broken((t) => { t.x.pop(); }), null, 'eripituiset sarjat');
+  assert.equal(broken((t) => { t.y[3] = null; }), null, 'puuttuva arvo');
+  assert.equal(broken((t) => { t.y[3] = '1'; }), null, 'teksti');
+  assert.equal(broken((t) => { t.x[5] = 1e9; }), null, 'mäen ulkopuolella');
+  assert.equal(broken((t) => { t.p[0] = 99; }), null, 'tuntematon asento');
+  assert.equal(broken((t) => { t.x[40] = t.x[39] - 5; }), null, 'taaksepäin');
+  assert.equal(broken((t) => { for (const k of 'xyap') t[k].length = 10; }), null, 'liian lyhyt');
+  assert.equal(broken((t) => { for (const k of 'xyap') t[k] = Array(2000).fill(t[k][0]); }), null, 'liian pitkä');
+});
+
+test('tavoitteet: viivat ja erot lasketaan tulostaulusta', () => {
+  const top = [{ name: 'Aino', total: 150 }, { name: 'Minä', total: 131 }, { name: 'Pena', total: 140.2 }, { name: 'Ville', total: 120 }];
+  top.sort((a, b) => b.total - a.total);
+  // Viivan pituudella ja oletustyylillä pisteet ylittävät tavoitteen, puoli metriä lyhyemmällä eivät
+  for (const total of [120, 131.3, 140.2]) {
+    const d = distanceFor(hill, total), pts = (dd) => distancePoints(hill, dd) + TARGET_JUDGE * 3;
+    assert.ok(pts(d) > total && pts(d - 0.5) <= total, `tavoite ${total}: ${d} m`);
+  }
+  const { leader, next } = findRivals(top, 'Minä', 131);
+  assert.deepEqual([leader.name, leader.rank, next.name, next.rank], ['Aino', 1, 'Pena', 2]);
+  const lines = hillTargets(hill, { distance: 124.5, total: 131 }, top, 'Minä');
+  assert.deepEqual(lines.map((l) => l.kind), ['own', 'next', 'leader']);
+  assert.equal(lines[0].d, 124.5);
+  assert.ok(lines[1].d < lines[2].d && lines[2].d <= hill.hs + 16);
+  assert.match(rivalGap(top, 'Minä', 131), /^Sijaan 2 \(Pena\) on matkaa 9,2 p\.$/);
+  assert.match(rivalGap(top, 'Minä', 141), /^Kärkeen \(Aino\) on matkaa 9,0 p\.$/);
+  assert.equal(rivalGap(top, 'Minä', 151), 'Johdat tulostaulua.');
+  assert.equal(rivalGap(null, 'Minä', 100), '');
+  // Ilman tulostaulua jää vain oma ennätys, ilman ennätystä ei mitään
+  assert.deepEqual(hillTargets(hill, { distance: 110, total: 90 }, null, null).map((l) => l.kind), ['own']);
+  assert.deepEqual(hillTargets(hill, null, null, null), []);
+  // Kärjessä olevalle ei piirretä kilpailijoita
+  assert.deepEqual(hillTargets(hill, { distance: 135, total: 151 }, top, 'Minä').map((l) => l.kind), ['own']);
 });
 
 console.log(`${passed} testiä OK`);

@@ -1,9 +1,12 @@
 // Tuulimäen globaali tulostaulu: Cloudflare Worker + D1.
-//   POST /score  {name, deviceId, hill, season, distance, style}
+//   POST /score  {name, deviceId, hill, season, distance, style, ghost?}
 //   GET  /top?hill=tuulivaara&season=2   50 parasta, paras tulos per pelaaja (oletus: nykyinen kausi)
+//   GET  /ghost?hill=tuulivaara          haamuhyppääjä: nykyisen kauden parhaan tuloksen rata
 //
 // Palvelin laskee kokonaispisteet itse pituudesta ja tyylipisteistä, joten
 // asiakkaan ilmoittamaan summaan ei luoteta.
+
+import { cleanGhost } from './ghost.js';
 
 /** Mäet: pidä samana kuin pelin js/config.js. maxDistance = pisin uskottava hyppy. */
 const HILLS = {
@@ -37,7 +40,7 @@ const MAX_STYLE = 60;        // 3 × 20
 const STYLE_STEP = 1.5;      // 3 × puolen pisteen portaat
 const DISTANCE_STEP = 0.5;
 const DEVICE_COOLDOWN_MS = 5000;   // yksi hyppy kestää pidempään kuin tämä
-const MAX_BODY = 1024;
+const MAX_BODY = 24 * 1024;   // haamun rata on noin 10 kt
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const NAME_RE = /^[\p{L}\p{N}](?:[\p{L}\p{N} ._-]*[\p{L}\p{N}])?$/u;
@@ -79,6 +82,10 @@ export default {
         if (!(await env.RL_GET.limit({ key: ip })).success) return tooMany(json, 60);
         return await getTop(url, env, json);
       }
+      if (route === 'GET /ghost') {
+        if (!(await env.RL_GET.limit({ key: ip })).success) return tooMany(json, 60);
+        return await getGhost(url, env, json);
+      }
       if (route === 'POST /score') {
         // Tuloksia saa lähettää vain pelisivulta
         if (!allowed) return json(403, { error: 'origin_not_allowed' });
@@ -102,7 +109,7 @@ async function getTop(url, env, json) {
   const season = raw === null ? SEASON : Number(raw);
   if (!Number.isInteger(season) || season < 1 || season > SEASON) return json(400, { error: 'unknown_season' });
   const { results } = await env.DB.prepare(
-    `SELECT p.name, s.distance, s.style, s.total, s.achieved_at AS at
+    `SELECT p.name, s.distance, s.style, s.total, s.achieved_at AS at, s.ghost IS NOT NULL AS ghost
        FROM scores s JOIN players p ON p.device_hash = s.device_hash
       WHERE s.season = ? AND s.hill = ?
       ORDER BY s.total DESC, s.distance DESC, s.achieved_at ASC
@@ -111,10 +118,28 @@ async function getTop(url, env, json) {
   return json(200, { hill, season, seasonName: seasonName(season), currentSeason: SEASON, top: results }, { 'Cache-Control': 'public, max-age=20' });
 }
 
+/**
+ * Haamuhyppääjä: nykyisen kauden paras tulos, jolla on rata. Yleensä tulostaulun kärki –
+ * jos kärjen tulos on ajalta ennen haamuja tai päättyi kaatumiseen, seuraava jolla rata on.
+ */
+async function getGhost(url, env, json) {
+  const hill = url.searchParams.get('hill') || 'tuulivaara';
+  if (!Object.hasOwn(HILLS, hill)) return json(400, { error: 'unknown_hill' });
+  const row = await env.DB.prepare(
+    `SELECT p.name, s.distance, s.total, s.achieved_at AS at, s.ghost
+       FROM scores s JOIN players p ON p.device_hash = s.device_hash
+      WHERE s.season = ? AND s.hill = ? AND s.ghost IS NOT NULL
+      ORDER BY s.total DESC, s.distance DESC, s.achieved_at ASC
+      LIMIT 1`,
+  ).bind(SEASON, hill).first();
+  const body = row ? { ...row, ghost: JSON.parse(row.ghost) } : { ghost: null };
+  return json(200, { hill, season: SEASON, ...body }, { 'Cache-Control': 'public, max-age=20' });
+}
+
 async function postScore(request, env, json) {
   const input = await readInput(request);
   if (input.error) return json(400, { error: input.error });
-  const { name, nameKey, deviceId, hill, distance, style } = input;
+  const { name, nameKey, deviceId, hill, distance, style, ghost } = input;
 
   const def = HILLS[hill];
   const total = round1(Math.max(0, 60 + (distance - def.k) * def.pointsPerMeter) + style);
@@ -137,14 +162,14 @@ async function postScore(request, env, json) {
          VALUES (?1, ?2, ?3, ?4, ?4)
          ON CONFLICT (device_hash) DO UPDATE SET name = ?2, name_key = ?3, last_post_at = ?4`,
       ).bind(deviceHash, name, nameKey, now),
-      // Vain parannus korvaa aiemman tuloksen
+      // Vain parannus korvaa aiemman tuloksen. Rata vaihtuu tuloksen mukana, jotta haamu on aina samasta hypystä.
       db.prepare(
-        `INSERT INTO scores (device_hash, hill, season, distance, style, total, achieved_at)
-         VALUES (?1, ?2, ?7, ?3, ?4, ?5, ?6)
+        `INSERT INTO scores (device_hash, hill, season, distance, style, total, achieved_at, ghost)
+         VALUES (?1, ?2, ?7, ?3, ?4, ?5, ?6, ?8)
          ON CONFLICT (device_hash, hill, season) DO UPDATE
-           SET distance = ?3, style = ?4, total = ?5, achieved_at = ?6
+           SET distance = ?3, style = ?4, total = ?5, achieved_at = ?6, ghost = ?8
          WHERE ?5 > scores.total OR (?5 = scores.total AND ?3 > scores.distance)`,
-      ).bind(deviceHash, hill, distance, style, total, now, SEASON),
+      ).bind(deviceHash, hill, distance, style, total, now, SEASON, ghost),
     ]);
   } catch (err) {
     // Kaksi laitetta ehti varata saman nimen yhtä aikaa
@@ -197,6 +222,7 @@ async function readInput(request) {
     hill: body.hill,
     distance,
     style,
+    ghost: cleanGhost(body.ghost), // kelvoton rata ei hylkää tulosta: se jää vain ilman haamua
   };
 }
 

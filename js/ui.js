@@ -20,8 +20,28 @@ const OUTCOME_TEXT = {
 };
 
 const GAUGE_LABEL = { small: 'pienet', full: 'isot', off: 'pois' };
+const GHOST_LABEL = { own: 'oma ennätys', leader: 'tulostaulun kärki', off: 'pois' };
 
 const fmt = (v) => v.toFixed(1).replace('.', ',');
+
+/** Jälkianalyysin rivi: mistä metrit jäivät (ks. analysis.js). Arvio puolen metrin tarkkuudella. */
+function costText(c) {
+  const parts = [];
+  if (c.takeoff >= 0.5) parts.push(`ponnistus −${fmt(c.takeoff)} m`);
+  if (c.speed >= 0.5) parts.push(`kyykky −${fmt(c.speed)} m (−${fmt(c.kmh)} km/h)`);
+  if (Math.abs(c.flight) >= 0.5) parts.push(`liito ${c.flight > 0 ? '−' : '+'}${fmt(Math.abs(c.flight))} m`);
+  return parts.length ? `Arvio metreistä: ${parts.join(' · ')}` : 'Ei hukattuja metrejä – puhdas suoritus.';
+}
+
+/** Kuinka kauas ennätyksestä jäätiin. best = ennätys hypyn jälkeen. */
+function recordGap(r, best) {
+  const now = `${fmt(best.distance)} m · ${fmt(best.total)} p`;
+  if (r.total <= 0) return `Ennätys: ${now}`;
+  const parts = [];
+  if (r.distance < best.distance) parts.push(`${fmt(best.distance - r.distance)} m`);
+  if (r.total < best.total) parts.push(`${fmt(best.total - r.total)} p`);
+  return parts.length ? `Ennätyksestäsi jäi ${parts.join(' ja ')} (${now})` : `Sivusit ennätystäsi: ${now}`;
+}
 
 export class Ui {
   constructor() {
@@ -196,6 +216,9 @@ export class Ui {
   onGauges(fn) { $('btn-gauges').addEventListener('click', fn); }
   setGauges(mode) { $('btn-gauges').textContent = `Mittarit: ${GAUGE_LABEL[mode]}`; }
 
+  onGhost(fn) { $('btn-ghost').addEventListener('click', fn); }
+  setGhost(mode) { $('btn-ghost').textContent = `Haamu: ${GHOST_LABEL[mode]}`; }
+
   onStart(fn) { $('btn-start').addEventListener('click', fn); }
   onAgain(fn) { $('btn-again').addEventListener('click', fn); }
 
@@ -217,7 +240,8 @@ export class Ui {
 
   get resultVisible() { return !this.result.hidden; }
 
-  showResult(r, record) {
+  /** @param costs  analyzeJump()-tulos tai null */
+  showResult(r, record, costs = null) {
     $('res-outcome').textContent = r.crash === 'inrun' ? 'Kaatuminen vauhtimäessä'
       : r.crash === 'flight' ? 'Kaatuminen ilmassa' : OUTCOME_TEXT[r.outcome];
     $('res-outcome').dataset.outcome = r.outcome;
@@ -233,7 +257,9 @@ export class Ui {
     const rec = $('res-record');
     if (record.distanceRecord) rec.textContent = 'Uusi mäkiennätys!';
     else if (record.pointsRecord) rec.textContent = 'Uusi piste-ennätys!';
-    else rec.textContent = `Ennätys: ${fmt(record.best.distance)} m · ${fmt(record.best.total)} p`;
+    else rec.textContent = recordGap(r, record.best);
+    $('res-costs').hidden = !costs;
+    $('res-costs').textContent = costs ? costText(costs) : '';
     rec.classList.toggle('new', record.distanceRecord || record.pointsRecord);
     this.result.hidden = false;
     this.controls.hidden = true;

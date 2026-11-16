@@ -3,10 +3,11 @@
 // Ei riipu DOMista eikä piirrosta: ohjaus annetaan step()-kutsulle, joten samaa
 // luokkaa voi ajaa ihmispelaaja, testibotti tai (vaiheessa 2) tietokonevastustaja.
 
-import { G, INRUN, TAKEOFF, FLIGHT, LANDING, GATE_TIME, WIND, BAND, CRASH } from './config.js';
+import { G, INRUN, TAKEOFF, FLIGHT, LANDING, GATE_TIME, WIND, BAND, CRASH, SPLITS } from './config.js';
 import { clamp, lerp, randn } from './util.js';
 import { inrunAccel, takeoffQuality, lateTakeoffQuality, flightAccel, slideAccel, aoaOptAt } from './physics.js';
 import { scoreJump, scoreInrunCrash, Outcome } from './scoring.js';
+import { GHOST, newTrack, recordTrack } from './ghost.js';
 
 export const Phase = {
   READY: 'ready',     // puomilla, odottaa lähtöä
@@ -27,6 +28,7 @@ export class Jump {
     this.hill = hill;
     this.wind = wind;
     this.rng = rng;
+    this.splitX = SPLITS.map((d) => hill.landingPos(d).x);
     this.reset();
   }
 
@@ -76,6 +78,13 @@ export class Jump {
     this.spin = 0;              // pyörimisnopeus kaatuessa (rad/s)
     this.crashHits = 0;         // iskujen määrä (piirto seuraa tätä tehosteita varten)
     this.crashImpact = 0;       // viimeisimmän iskun voimakkuus (m/s)
+    // Jälkianalyysia ja väliaikoja varten (eivät vaikuta fysiikkaan)
+    this.cleanSpeed = 0;        // nopeus, jos kyykky olisi ollut koko ajan kaistalla
+    this.cleanTakeoffSpeed = 0;
+    this.windLog = [];          // tuuli lennon jokaisella askeleella
+    this.splits = [];           // [{t, height}] SPLITS-etäisyyksien kohdalla
+    this.runT = 0;              // aika puomilta lähdöstä: haamu kulkee tämän kellon mukaan
+    this.track = newTrack();    // hypyn rata haamua varten (ghost.js)
   }
 
   /**
@@ -92,6 +101,13 @@ export class Jump {
       case Phase.SLIDE: this.stepSlide(dt); break;
       case Phase.CRASH: this.stepCrash(dt); break;
     }
+    if (this.phase === Phase.READY) return;
+    // Rata talteen puomilta hetkeen alastulon jälkeen. Kaatuneen hypyn nauhaa ei käytetä.
+    const p = this.phase;
+    if (p === Phase.INRUN || p === Phase.FLIGHT || (p === Phase.SLIDE && this.t <= GHOST.tail)) {
+      recordTrack(this.track, this.runT, this);
+    }
+    this.runT += dt;
   }
 
   setPhase(phase) {
@@ -118,6 +134,9 @@ export class Jump {
       this.startCrash('inrun');
       return;
     }
+    // Vertailunopeus samalla matkalla ilman asentovirhettä: nopeampi kulkisi saman välin lyhyemmässä ajassa
+    const cleanDt = this.cleanSpeed > 1 ? dt * this.speed / this.cleanSpeed : dt;
+    this.cleanSpeed = Math.max(0, this.cleanSpeed + inrunAccel(this.cleanSpeed, angle, this.wind.value, 0) * cleanDt);
     this.speed = Math.max(0, this.speed + inrunAccel(this.speed, angle, this.wind.value, this.balanceError) * dt);
     this.d -= this.speed * dt;
 
@@ -168,6 +187,7 @@ export class Jump {
     const a = this.hill.def.tableAngle;
     const over = -this.d; // nokan yli tällä askeleella kuljettu matka
     this.takeoffSpeed = this.speed;
+    this.cleanTakeoffSpeed = Math.max(this.speed, this.cleanSpeed);
     this.vx = Math.cos(a) * this.speed;
     this.vy = -Math.sin(a) * this.speed;
     this.x = Math.cos(a) * over;
@@ -205,6 +225,7 @@ export class Jump {
   stepFlight(dt, input) {
     const hill = this.hill;
     const wind = this.wind.value;
+    this.windLog.push(wind);
     this.aoaOpt = aoaOptAt(this.t);
 
     if (input.action) {
@@ -270,6 +291,9 @@ export class Jump {
     if (this.height <= 0) {
       this.land(ground);
       return;
+    }
+    if (this.splits.length < SPLITS.length && this.x >= this.splitX[this.splits.length]) {
+      this.splits.push({ t: this.t, height: this.height });
     }
     // Liian kauan liian kaukana kaistasta: hyppääjä menettää hallinnan ilmassa
     const risky = !this.landPrep && this.t > FLIGHT.entryTime + 0.3;

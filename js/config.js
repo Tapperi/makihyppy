@@ -208,4 +208,7 @@ export const LEADERBOARD = {
   url: 'https://tuulimaki-scores.tapperi.workers.dev', // näkyy `wrangler deploy` -komennon tulosteessa
 };
 
+/** Väliajat: lentokorkeus mitataan näillä etäisyyksillä (m) ja sitä verrataan ennätyshyppyyn. */
+export const SPLITS = [50, 90];
+
 export const GATE_TIME = 20; // lähtöaika sekunteina, sen jälkeen hyppääjä lähtee itse
